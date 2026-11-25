@@ -579,6 +579,74 @@ class DootRepository:
         row = await cursor.fetchone()
         return dict(row) if row is not None else None
 
+    async def save_application_prepared(
+        self,
+        job_id: int,
+        *,
+        filled_fields: dict[str, str],
+        screenshot_path: str | None = None,
+        resume_path: str | None = None,
+        status: str = "AWAITING_APPROVAL",
+    ) -> None:
+        """Persist prepared form fields and screenshot path for an application."""
+        await self.conn.execute(
+            """
+            INSERT INTO applications (
+                job_id, status, resume_path, filled_fields_json, screenshot_path
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                status = excluded.status,
+                resume_path = COALESCE(excluded.resume_path, applications.resume_path),
+                filled_fields_json = excluded.filled_fields_json,
+                screenshot_path = COALESCE(excluded.screenshot_path, applications.screenshot_path),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            """,
+            (
+                job_id,
+                status,
+                resume_path,
+                json.dumps(filled_fields),
+                screenshot_path,
+            ),
+        )
+        await self.conn.commit()
+
+    async def mark_application_submitted(self, job_id: int) -> None:
+        """Mark an application row as APPLIED with submission timestamp."""
+        await self.conn.execute(
+            """
+            UPDATE applications
+            SET status = 'APPLIED',
+                submitted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                error_message = NULL,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        )
+        await self.conn.commit()
+
+    async def mark_application_failed(
+        self,
+        job_id: int,
+        error_message: str,
+        *,
+        status: str = "FAILED",
+    ) -> None:
+        """Record an application preparation/submission failure or manual-action halt."""
+        await self.conn.execute(
+            """
+            INSERT INTO applications (job_id, status, error_message)
+            VALUES (?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                status = excluded.status,
+                error_message = excluded.error_message,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            """,
+            (job_id, status, error_message[:500]),
+        )
+        await self.conn.commit()
+
     async def count_automated_applies_today(self) -> int:
         """Count automated applications submitted today (UTC date)."""
         cursor = await self.conn.execute(

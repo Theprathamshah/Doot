@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from doot.applier import FieldResolver, FilledFormResult, load_aliases_config, run_assisted_apply
 from doot.collectors import DomainRateLimiter
 from doot.collectors.dork import build_search_provider
 from doot.config import DootSettings
@@ -21,6 +22,7 @@ from doot.llm import build_llm_provider
 from doot.logging import configure_logging
 from doot.mcp_server import create_mcp_server
 from doot.models.enums import ATSProvider, JobStatus, RunStatus, RunType
+from doot.models.job import TailoredAssets
 from doot.notify import dispatch_one_way_alert, render_digest_table, render_job_panel
 from doot.pipeline import (
     add_company_from_target,
@@ -30,7 +32,7 @@ from doot.pipeline import (
     run_scoring_pipeline,
     sync_watchlist_from_yaml,
 )
-from doot.rag import load_stories_markdown, tailor_for_job
+from doot.rag import collect_evidence_chunks, load_stories_markdown, tailor_for_job
 
 T = TypeVar("T")
 
@@ -578,6 +580,106 @@ def mcp() -> None:
     settings = _load_settings()
     server = create_mcp_server(settings)
     server.run(transport="stdio")
+
+
+@app.command("apply")
+def apply_job(
+    job_id: Annotated[int, typer.Argument(help="Database ID of the ATS job to fill.")],
+    live_apply: Annotated[
+        bool,
+        typer.Option(
+            "--apply",
+            help="Allow form submission after confirmation (default: dry-run).",
+        ),
+    ] = False,
+    headless: Annotated[
+        bool,
+        typer.Option("--headless", help="Run Chromium headless instead of headed."),
+    ] = False,
+) -> None:
+    """Pre-fill Greenhouse/Lever/Ashby form in headed Chromium and confirm before submit."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+        profile = load_user_profile(settings)
+    except (SafetyGuardError, FileNotFoundError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    aliases = load_aliases_config(settings.data_dir / "aliases.yaml")
+    resume_md = load_resume_markdown(profile, settings)
+    stories_md = load_stories_markdown(profile, settings)
+    evidence = [
+        c.render_for_prompt()
+        for c in collect_evidence_chunks(
+            profile, resume_markdown=resume_md, stories_markdown=stories_md
+        )
+    ]
+    llm = (
+        build_llm_provider(settings)
+        if settings.gemini_api_key.get_secret_value()
+        else None
+    )
+
+    async def _ask_cli(question: str) -> str | None:
+        ans = typer.prompt(f"Unknown ATS question '{question}' (blank to skip)", default="")
+        return str(ans) if str(ans).strip() else None
+
+    async def _confirm_submit(filled: FilledFormResult) -> bool:
+        table = Table(title=f"Prepared Fields for Job #{job_id}")
+        table.add_column("Field", style="cyan")
+        table.add_column("Value")
+        for k, v in filled.resolved_fields.items():
+            table.add_row(k, v[:120])
+        console.print(table)
+        if filled.unknown_questions:
+            unresolved = ", ".join(filled.unknown_questions)
+            console.print(f"[yellow]Unresolved required fields:[/yellow] {unresolved}")
+        console.print(f"[dim]Screenshot saved to: {filled.screenshot_path}[/dim]")
+        return typer.confirm("Submit this application now?", default=False)
+
+    async def _run() -> Any:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            stored_app = await repo.get_application(job_id)
+            assets = (
+                TailoredAssets(
+                    tailored_summary=stored_app["tailored_summary"] or "",
+                    cover_note=stored_app["cover_note"] or "",
+                    outreach_dm=stored_app["outreach_note"] or "",
+                )
+                if stored_app is not None
+                else None
+            )
+            resolver = FieldResolver(
+                profile=profile,
+                aliases=aliases,
+                repo=repo,
+                llm_provider=llm,
+                evidence_chunks=evidence,
+                ask_user_fn=_ask_cli,
+            )
+            return await run_assisted_apply(
+                settings,
+                repo,
+                job_id=job_id,
+                profile=profile,
+                field_resolver=resolver,
+                tailored_assets=assets,
+                apply_flag=live_apply,
+                headless=headless,
+                confirm_submit_fn=_confirm_submit,
+            )
+
+    try:
+        result = _run_async(_run())
+    except (SafetyGuardError, LookupError, ValueError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    color = "green" if result.submitted else "yellow"
+    console.print(f"[{color}]{result.status.value}:[/{color}] {result.message}")
 
 
 @app.command("pipeline-run")

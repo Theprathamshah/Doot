@@ -80,6 +80,7 @@ ALLOWED_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
     JobStatus.AWAITING_APPROVAL: frozenset(
         {
             JobStatus.APPLIED,
+            JobStatus.PREPARED,
             JobStatus.FAILED,
             JobStatus.NEEDS_MANUAL_ACTION,
             JobStatus.SKIPPED,

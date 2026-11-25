@@ -1,0 +1,17 @@
+# Per-ATS selector fallbacks (semantic get_by_label / get_by_role are tried first).
+
+ats:
+  greenhouse:
+    resume_input: 'input[type="file"][name*="resume"], input[type="file"]'
+    submit_button: 'button[type="submit"], input[type="submit"]#submit_app'
+    cover_letter_textarea: 'textarea[name*="cover_letter"], textarea#cover_letter_text'
+
+  lever:
+    resume_input: 'input[type="file"][name="resume"], input[type="file"]'
+    submit_button: 'button[type="submit"], button.postings-btn'
+    cover_letter_textarea: 'textarea[name="comments"]'
+
+  ashby:
+    resume_input: 'input[type="file"]'
+    submit_button: 'button[type="submit"]'
+    cover_letter_textarea: 'textarea'

@@ -9,12 +9,16 @@ Local-first **Job Search Triage, RAG-Grounded Resume Tailoring, MCP Server, and 
 - [LLD.md](LLD.md) — SQLite WAL schema, enforced state machine, `Protocol` contracts, and config
 - [PLAN.md](PLAN.md) — Phased implementation roadmap
 
-## Phase 1–5: Quick Start
+## Phase 1–6: Quick Start
 
 1. Copy `.env.example` to `.env` (`chmod 600 .env`), `data/profile.example.json` to `data/profile.json`, `data/resume.example.md` to `data/resume.md`, `data/stories.example.md` to `data/stories.md`, and `data/companies.example.yaml` to `data/companies.yaml`.
-2. Add your `DOOT_GEMINI_API_KEY` to `.env`, then run:
+2. Install Playwright's Chromium binary once for Phase 6 assisted-apply:
    ```bash
    uv sync
+   uv run playwright install chromium
+   ```
+3. Add your `DOOT_GEMINI_API_KEY` to `.env`, then run:
+   ```bash
    uv run doot init
    uv run doot sync-watchlist
    uv run doot add-company https://boards.greenhouse.io/postman --name Postman
@@ -22,6 +26,8 @@ Local-first **Job Search Triage, RAG-Grounded Resume Tailoring, MCP Server, and 
    uv run doot score                 # Stage 1 + cached Gemini scoring (PII redacted)
    uv run doot digest --notify       # Ranked table + optional macOS/webhook/email alert
    uv run doot tailor 1              # RAG-grounded summary, cover note & outreach DM
+   uv run doot apply 1               # Headed Chromium pre-fill (dry-run by default)
+   uv run doot apply 1 --apply       # Live submit (requires DOOT_DRY_RUN=false + Y confirm)
    uv run doot review                # Interactive triage ([t]ailor / [s]kip / [a]pplied / [o]pen)
    uv run doot stats
    ```
