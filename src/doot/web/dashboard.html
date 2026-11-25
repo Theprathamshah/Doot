@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Doot — Job Triage & Direct Apply</title>
+    <style>
+      :root {
+        --bg-light: #f8fafc;
+        --bg-dark: #0b1120;
+        --surface-light: #ffffff;
+        --surface-dark: #111827;
+        --surface-alt-light: #f1f5f9;
+        --surface-alt-dark: #1e293b;
+        --border-light: #e2e8f0;
+        --border-dark: #334155;
+        --text-light: #0f172a;
+        --text-dark: #f1f5f9;
+        --muted-light: #475569;
+        --muted-dark: #94a3b8;
+        --accent-light: #2563eb;
+        --accent-dark: #60a5fa;
+        --success-light: #15803d;
+        --success-dark: #4ade80;
+        --warn-light: #b45309;
+        --warn-dark: #fbbf24;
+
+        --bg: var(--bg-light);
+        --surface: var(--surface-light);
+        --surface-alt: var(--surface-alt-light);
+        --border: var(--border-light);
+        --text: var(--text-light);
+        --muted: var(--muted-light);
+        --accent: var(--accent-light);
+        --success: var(--success-light);
+        --warn: var(--warn-light);
+
+        @media (prefers-color-scheme: dark) {
+          --bg: var(--bg-dark);
+          --surface: var(--surface-dark);
+          --surface-alt: var(--surface-alt-dark);
+          --border: var(--border-dark);
+          --text: var(--text-dark);
+          --muted: var(--muted-dark);
+          --accent: var(--accent-dark);
+          --success: var(--success-dark);
+          --warn: var(--warn-dark);
+        }
+
+        @supports (color: light-dark(white, black)) {
+          --bg: light-dark(var(--bg-light), var(--bg-dark));
+          --surface: light-dark(var(--surface-light), var(--surface-dark));
+          --surface-alt: light-dark(var(--surface-alt-light), var(--surface-alt-dark));
+          --border: light-dark(var(--border-light), var(--border-dark));
+          --text: light-dark(var(--text-light), var(--text-dark));
+          --muted: light-dark(var(--muted-light), var(--muted-dark));
+          --accent: light-dark(var(--accent-light), var(--accent-dark));
+          --success: light-dark(var(--success-light), var(--success-dark));
+          --warn: light-dark(var(--warn-light), var(--warn-dark));
+        }
+
+        color-scheme: light dark;
+        accent-color: var(--accent);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+      }
+
+      .container {
+        max-inline-size: 1320px;
+        margin-inline: auto;
+        padding: 1.25rem;
+      }
+
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin-block-end: 1rem;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+
+      .subtitle {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin: 0.2rem 0 0;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.75rem;
+        margin-block-end: 1.25rem;
+      }
+
+      .stat-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+      }
+
+      .stat-label {
+        font-size: 0.78rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .stat-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        margin-block-start: 0.15rem;
+      }
+
+      .tablist {
+        display: flex;
+        overflow-x: auto;
+        gap: 0.25rem;
+        border-block-end: 1px solid var(--border);
+        margin-block-end: 1rem;
+      }
+
+      .tab-btn {
+        position: relative;
+        flex: none;
+        background: transparent;
+        color: var(--muted);
+        border: 0;
+        padding: 0.65rem 1rem;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .tab-btn[aria-selected="true"] {
+        color: var(--accent);
+      }
+
+      .tab-btn[aria-selected="true"]::after {
+        content: "";
+        position: absolute;
+        inset: auto 0 0;
+        border-block-end: 3px solid var(--accent);
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        align-items: center;
+        margin-block-end: 1rem;
+      }
+
+      input[type="search"],
+      select {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font: inherit;
+      }
+
+      input[type="search"] {
+        min-inline-size: 260px;
+        flex: 1;
+      }
+
+      .checkbox-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        color: var(--text);
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        border-radius: 7px;
+        padding: 0.38rem 0.7rem;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .btn:hover {
+        background: var(--surface-alt);
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #ffffff;
+        border-color: var(--accent);
+      }
+
+      .btn-primary:hover {
+        opacity: 0.92;
+        background: var(--accent);
+      }
+
+      .btn-success {
+        color: var(--success);
+        border-color: var(--success);
+      }
+
+      .table-wrapper {
+        overflow: auto;
+        max-inline-size: 100%;
+        max-block-size: min(680px, 72vh);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        container-type: inline-size;
+      }
+
+      table {
+        inline-size: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        text-align: start;
+        font-size: 0.9rem;
+        --label-1: "Job";
+        --label-2: "Company";
+        --label-3: "Location";
+        --label-4: "Score";
+        --label-5: "Mode";
+        --label-6: "Status";
+        --label-7: "Actions";
+      }
+
+      caption.sr-only {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+
+      thead {
+        position: sticky;
+        inset-block-start: 0;
+        z-index: 2;
+        background: var(--surface-alt);
+      }
+
+      th,
+      td {
+        padding: 0.7rem 0.8rem;
+        border-block-end: 1px solid var(--border);
+        vertical-align: middle;
+      }
+
+      tbody th {
+        font-weight: 600;
+        text-align: start;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        background: var(--surface-alt);
+        white-space: nowrap;
+      }
+
+      .badge-score-5 {
+        color: var(--success);
+        border-color: var(--success);
+      }
+
+      .badge-score-4 {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+
+      .actions-cell {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+
+      @container (width < 700px) {
+        table,
+        thead,
+        tbody,
+        tr,
+        th,
+        td {
+          display: block;
+        }
+
+        thead {
+          display: none;
+        }
+
+        tr {
+          margin-block-end: 0.85rem;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 0.4rem;
+        }
+
+        tbody th {
+          position: sticky;
+          inset-block-start: 0;
+          z-index: 1;
+          background: var(--surface-alt);
+          border-radius: 6px;
+        }
+
+        td:nth-child(2)::before {
+          content: var(--label-2) ": ";
+          font-weight: 600;
+        }
+        td:nth-child(3)::before {
+          content: var(--label-3) ": ";
+          font-weight: 600;
+        }
+        td:nth-child(4)::before {
+          content: var(--label-4) ": ";
+          font-weight: 600;
+        }
+        td:nth-child(5)::before {
+          content: var(--label-5) ": ";
+          font-weight: 600;
+        }
+        td:nth-child(6)::before {
+          content: var(--label-6) ": ";
+          font-weight: 600;
+        }
+      }
+
+      dialog {
+        inline-size: min(820px, 94vw);
+        max-block-size: 88vh;
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.25rem;
+      }
+
+      dialog:modal {
+        overscroll-behavior: contain;
+      }
+
+      dialog::backdrop {
+        background: rgb(0 0 0 / 0.55);
+        overflow: hidden;
+        overscroll-behavior: contain;
+      }
+
+      .dialog-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        border-block-end: 1px solid var(--border);
+        padding-block-end: 0.75rem;
+        margin-block-end: 0.75rem;
+      }
+
+      .dialog-header h1 {
+        font-size: 1.2rem;
+      }
+
+      .section-box {
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.75rem 0.9rem;
+        margin-block-end: 0.8rem;
+        white-space: pre-wrap;
+        font-size: 0.88rem;
+      }
+
+      .pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-block-start: 0.85rem;
+        font-size: 0.88rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <h1>Doot — Job Triage & Direct Apply</h1>
+          <p class="subtitle">Local dashboard over SQLite WAL — open apply links directly or tailor & track applications.</p>
+        </div>
+        <button type="button" class="btn" id="refresh-btn">Refresh</button>
+      </header>
+
+      <section class="stats-grid" aria-label="Funnel Summary">
+        <div class="stat-card">
+          <div class="stat-label">Selected (4-5/5)</div>
+          <div class="stat-value" id="stat-selected">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Jobs</div>
+          <div class="stat-value" id="stat-total">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Applied</div>
+          <div class="stat-value" id="stat-applied">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Active ATS Boards</div>
+          <div class="stat-value" id="stat-companies">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Saved Contacts</div>
+          <div class="stat-value" id="stat-contacts">-</div>
+        </div>
+      </section>
+
+      <div class="tablist" role="tablist" aria-label="Job Views">
+        <button type="button" role="tab" class="tab-btn" data-view="selected" aria-selected="true">Selected Jobs (4-5/5)</button>
+        <button type="button" role="tab" class="tab-btn" data-view="all" aria-selected="false">All Jobs</button>
+        <button type="button" role="tab" class="tab-btn" data-view="applied" aria-selected="false">Applied</button>
+        <button type="button" role="tab" class="tab-btn" data-view="filtered" aria-selected="false">Filtered Out</button>
+      </div>
+
+      <div class="toolbar">
+        <input type="search" id="search-input" aria-label="Search jobs" placeholder="Search company, role, location, AWS, Java, RAG..." />
+        <select id="min-score-select" aria-label="Minimum score">
+          <option value="0">Any Score</option>
+          <option value="4">Score 4+</option>
+          <option value="5">Score 5 only</option>
+        </select>
+        <label class="checkbox-label">
+          <input type="checkbox" id="ats-only-checkbox" />
+          Direct ATS only (Greenhouse / Lever / Ashby)
+        </label>
+      </div>
+
+      <div tabindex="0" role="region" aria-labelledby="jobs-table-caption" class="table-wrapper">
+        <table>
+          <caption id="jobs-table-caption" class="sr-only">Discovered and selected jobs</caption>
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Company</th>
+              <th>Location</th>
+              <th>Score</th>
+              <th>Mode</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="pagination">
+        <span id="results-meta">Loading...</span>
+        <div>
+          <button type="button" class="btn" id="prev-btn">Previous</button>
+          <button type="button" class="btn" id="next-btn">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <dialog id="job-dialog" closedby="any" aria-labelledby="dialog-title">
+      <div class="dialog-header">
+        <div>
+          <h1 id="dialog-title">Job Details</h1>
+          <div id="dialog-subtitle" class="subtitle"></div>
+        </div>
+        <form method="dialog">
+          <button type="submit" class="btn" autofocus>Close</button>
+        </form>
+      </div>
+
+      <div id="dialog-actions" class="toolbar"></div>
+      <div id="dialog-reasoning" class="section-box"></div>
+      <div id="dialog-tailor" class="section-box" hidden></div>
+      <div id="dialog-contacts" class="section-box" hidden></div>
+      <div id="dialog-jd" class="section-box"></div>
+    </dialog>
+
+    <script>
+      const state = {
+        view: "selected",
+        q: "",
+        minScore: 0,
+        atsOnly: false,
+        limit: 50,
+        offset: 0,
+        total: 0,
+      };
+
+      const tbody = document.getElementById("jobs-tbody");
+      const metaEl = document.getElementById("results-meta");
+      const dialog = document.getElementById("job-dialog");
+
+      // Light-dismiss fallback for browsers without <dialog closedby="any">
+      if (!("closedBy" in HTMLDialogElement.prototype)) {
+        const outside = (e) => {
+          const r = dialog.getBoundingClientRect();
+          return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+        };
+        let pressedOutside = false;
+        dialog.addEventListener("pointerdown", (e) => { pressedOutside = outside(e); });
+        dialog.addEventListener("pointerup", (e) => { if (pressedOutside && outside(e)) dialog.close(); });
+      }
+
+      dialog.addEventListener("close", () => {
+        dialog.returnValue = "";
+      });
+
+      function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined && text !== null) node.textContent = String(text);
+        return node;
+      }
+
+      function safeApplyLink(url, label) {
+        if (!url || (!url.startsWith("https://") && !url.startsWith("http://"))) {
+          return el("span", "subtitle", "No URL");
+        }
+        const a = el("a", "btn btn-primary", label);
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        return a;
+      }
+
+      async function loadStats() {
+        const res = await fetch("/api/stats");
+        const data = await res.json();
+        document.getElementById("stat-selected").textContent = String(data.selected_count ?? 0);
+        document.getElementById("stat-total").textContent = String(data.total_jobs ?? 0);
+        document.getElementById("stat-applied").textContent = String(data.funnel?.APPLIED ?? 0);
+        document.getElementById("stat-companies").textContent = String(data.active_companies ?? 0);
+        document.getElementById("stat-contacts").textContent = String(data.contacts_count ?? 0);
+      }
+
+      async function updateStatus(jobId, status) {
+        const res = await fetch(`/api/jobs/${jobId}/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(err.error || "Could not update status");
+          return;
+        }
+        await Promise.all([loadStats(), loadJobs()]);
+      }
+
+      async function openJobDetail(jobId) {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) return;
+        const job = await res.json();
+
+        document.getElementById("dialog-title").textContent = `${job.title}`;
+        document.getElementById("dialog-subtitle").textContent =
+          `${job.company_name} | ${job.location_raw || "Unspecified"} | Score: ${job.llm_score ?? "-"}/5 | Status: ${job.status}`;
+
+        const actionsEl = document.getElementById("dialog-actions");
+        const tailorBox = document.getElementById("dialog-tailor");
+        const contactsBox = document.getElementById("dialog-contacts");
+
+        const applyAnchor = safeApplyLink(job.apply_url, "Go to Apply Page ↗");
+        const applyBtn = el("button", "btn btn-success", "Mark Applied");
+        applyBtn.type = "button";
+        applyBtn.onclick = async () => { await updateStatus(job.id, "APPLIED"); dialog.close(); };
+
+        const skipBtn = el("button", "btn", "Skip");
+        skipBtn.type = "button";
+        skipBtn.onclick = async () => { await updateStatus(job.id, "SKIPPED"); dialog.close(); };
+
+        const tailorBtn = el("button", "btn", "Generate RAG Tailor");
+        tailorBtn.type = "button";
+        tailorBtn.onclick = async () => {
+          tailorBtn.disabled = true;
+          tailorBtn.textContent = "Tailoring...";
+          const r = await fetch(`/api/jobs/${job.id}/tailor`, { method: "POST" });
+          const d = await r.json();
+          tailorBox.hidden = false;
+          tailorBox.textContent = r.ok
+            ? `TAILORED SUMMARY:\n${d.tailored_summary}\n\nCOVER NOTE:\n${d.cover_note}\n\nOUTREACH DM:\n${d.outreach_dm}\n\nCITED: ${(d.cited_story_ids || []).join(", ")}`
+            : `Tailor error: ${d.error}`;
+          tailorBtn.disabled = false;
+          tailorBtn.textContent = "Generate RAG Tailor";
+        };
+
+        const contactsBtn = el("button", "btn", "Find HR / EM Emails");
+        contactsBtn.type = "button";
+        contactsBtn.onclick = async () => {
+          contactsBtn.disabled = true;
+          contactsBtn.textContent = "Searching...";
+          const r = await fetch(`/api/jobs/${job.id}/find-contacts`, { method: "POST" });
+          const d = await r.json();
+          contactsBox.hidden = false;
+          if (!r.ok) {
+            contactsBox.textContent = `Contact lookup error: ${d.error}`;
+          } else if (!d.contacts || d.contacts.length === 0) {
+            contactsBox.textContent = `Domain: ${d.domain || "unknown"} (MX valid: ${d.mx_valid}). No public emails found.`;
+          } else {
+            contactsBox.textContent =
+              `Domain: ${d.domain} (MX valid: ${d.mx_valid})\n` +
+              d.contacts.map((c) => `- ${c.email} | ${c.person_name || "-"} (${c.role_title || "-"}) [${c.confidence}]`).join("\n");
+          }
+          contactsBtn.disabled = false;
+          contactsBtn.textContent = "Find HR / EM Emails";
+          await loadStats();
+        };
+
+        actionsEl.replaceChildren(applyAnchor, applyBtn, skipBtn, tailorBtn, contactsBtn);
+
+        const missing = (job.missing_skills && job.missing_skills.length) ? job.missing_skills.join(", ") : "None";
+        document.getElementById("dialog-reasoning").textContent =
+          `Reasoning: ${job.llm_reasoning || job.rule_filter_reason || "Not scored yet"}\nMissing Skills: ${missing}`;
+
+        if (job.application && job.application.tailored_summary) {
+          tailorBox.hidden = false;
+          tailorBox.textContent =
+            `TAILORED SUMMARY:\n${job.application.tailored_summary}\n\nCOVER NOTE:\n${job.application.cover_note || ""}`;
+        } else {
+          tailorBox.hidden = true;
+        }
+
+        if (job.contacts && job.contacts.length) {
+          contactsBox.hidden = false;
+          contactsBox.textContent = job.contacts
+            .map((c) => `- ${c.email} | ${c.person_name || "-"} (${c.role_title || "-"}) [${c.confidence}]`)
+            .join("\n");
+        } else {
+          contactsBox.hidden = true;
+        }
+
+        document.getElementById("dialog-jd").textContent = job.jd_text || "No description stored.";
+        dialog.showModal();
+      }
+
+      async function loadJobs() {
+        const params = new URLSearchParams({
+          view: state.view,
+          q: state.q,
+          min_score: String(state.minScore),
+          ats_only: String(state.atsOnly),
+          limit: String(state.limit),
+          offset: String(state.offset),
+        });
+        const res = await fetch(`/api/jobs?${params.toString()}`);
+        const data = await res.json();
+        state.total = data.total ?? 0;
+
+        const rows = [];
+        for (const job of data.jobs || []) {
+          const tr = document.createElement("tr");
+
+          const titleTh = document.createElement("th");
+          const titleBtn = el("button", "btn", job.title);
+          titleBtn.type = "button";
+          titleBtn.onclick = () => openJobDetail(job.id);
+          titleTh.appendChild(titleBtn);
+
+          const companyTd = el("td", "", job.company_name);
+          const locTd = el("td", "", job.location_raw || "-");
+
+          const scoreTd = document.createElement("td");
+          const scoreVal = job.llm_score ?? "-";
+          const scoreCls = job.llm_score >= 5 ? "badge badge-score-5" : (job.llm_score === 4 ? "badge badge-score-4" : "badge");
+          scoreTd.appendChild(el("span", scoreCls, `${scoreVal}/5`));
+
+          const modeText = job.alert_only ? `${job.source} (alert)` : `${job.ats_provider || job.source}`;
+          const modeTd = document.createElement("td");
+          modeTd.appendChild(el("span", "badge", modeText));
+
+          const statusTd = document.createElement("td");
+          statusTd.appendChild(el("span", "badge", job.status));
+
+          const actionsTd = el("td", "actions-cell");
+          actionsTd.appendChild(safeApplyLink(job.apply_url, "Apply ↗"));
+
+          if (job.status !== "APPLIED") {
+            const markBtn = el("button", "btn btn-success", "Applied ✓");
+            markBtn.type = "button";
+            markBtn.onclick = () => updateStatus(job.id, "APPLIED");
+            actionsTd.appendChild(markBtn);
+          }
+
+          if (job.status !== "SKIPPED" && job.status !== "APPLIED") {
+            const skipBtn = el("button", "btn", "Skip");
+            skipBtn.type = "button";
+            skipBtn.onclick = () => updateStatus(job.id, "SKIPPED");
+            actionsTd.appendChild(skipBtn);
+          }
+
+          tr.append(titleTh, companyTd, locTd, scoreTd, modeTd, statusTd, actionsTd);
+          rows.push(tr);
+        }
+
+        if (rows.length === 0) {
+          const emptyTr = document.createElement("tr");
+          const emptyTd = el("td", "subtitle", "No jobs match your current filters.");
+          emptyTd.colSpan = 7;
+          emptyTr.appendChild(emptyTd);
+          rows.push(emptyTr);
+        }
+
+        tbody.replaceChildren(...rows);
+        const start = state.total === 0 ? 0 : state.offset + 1;
+        const end = Math.min(state.offset + state.limit, state.total);
+        metaEl.textContent = `Showing ${start}-${end} of ${state.total} jobs`;
+        document.getElementById("prev-btn").disabled = state.offset === 0;
+        document.getElementById("next-btn").disabled = end >= state.total;
+      }
+
+      for (const tab of document.querySelectorAll(".tab-btn")) {
+        tab.addEventListener("click", () => {
+          for (const other of document.querySelectorAll(".tab-btn")) {
+            other.setAttribute("aria-selected", String(other === tab));
+          }
+          state.view = tab.dataset.view;
+          state.offset = 0;
+          loadJobs();
+        });
+      }
+
+      let searchTimer;
+      document.getElementById("search-input").addEventListener("input", (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          state.q = e.target.value;
+          state.offset = 0;
+          loadJobs();
+        }, 200);
+      });
+
+      document.getElementById("min-score-select").addEventListener("change", (e) => {
+        state.minScore = Number(e.target.value);
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("ats-only-checkbox").addEventListener("change", (e) => {
+        state.atsOnly = Boolean(e.target.checked);
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("prev-btn").addEventListener("click", () => {
+        state.offset = Math.max(0, state.offset - state.limit);
+        loadJobs();
+      });
+
+      document.getElementById("next-btn").addEventListener("click", () => {
+        if (state.offset + state.limit < state.total) {
+          state.offset += state.limit;
+          loadJobs();
+        }
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", () => {
+        loadStats();
+        loadJobs();
+      });
+
+      loadStats();
+      loadJobs();
+    </script>
+  </body>
+</html>

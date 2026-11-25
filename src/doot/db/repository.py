@@ -352,6 +352,73 @@ class DootRepository:
         rows = await cursor.fetchall()
         return [_row_to_job(r) for r in rows]
 
+    async def query_jobs(
+        self,
+        *,
+        view: str = "selected",
+        query_text: str = "",
+        min_score: int = 0,
+        source: str = "",
+        ats_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[JobRecord], int]:
+        """Search and filter jobs for the local web dashboard."""
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if view == "selected":
+            clauses.append(
+                "(status IN ('SCORED', 'NOTIFIED', 'PREPARED', 'AWAITING_APPROVAL') "
+                "AND COALESCE(llm_score, 0) >= ?)"
+            )
+            params.append(max(min_score, 4))
+        elif view == "applied":
+            clauses.append("status = 'APPLIED'")
+        elif view == "filtered":
+            clauses.append("status = 'FILTERED_OUT'")
+        else:
+            # 'all' excludes nothing unless min_score / filters are set
+            if min_score > 0:
+                clauses.append("COALESCE(llm_score, 0) >= ?")
+                params.append(min_score)
+
+        if query_text.strip():
+            like = f"%{query_text.strip().lower()}%"
+            clauses.append(
+                "(LOWER(title) LIKE ? OR LOWER(company_name) LIKE ? "
+                "OR LOWER(location_raw) LIKE ? OR LOWER(jd_text) LIKE ?)"
+            )
+            params.extend([like, like, like, like])
+
+        if source.strip():
+            clauses.append("source = ?")
+            params.append(source.strip())
+
+        if ats_only:
+            clauses.append("alert_only = 0")
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        count_cursor = await self.conn.execute(
+            f"SELECT COUNT(*) AS cnt FROM jobs {where}",
+            tuple(params),
+        )
+        count_row = await count_cursor.fetchone()
+        total = int(count_row["cnt"]) if count_row is not None else 0
+
+        list_params = [*params, limit, offset]
+        cursor = await self.conn.execute(
+            f"""
+            SELECT * FROM jobs
+            {where}
+            ORDER BY COALESCE(llm_score, 0) DESC, alert_only ASC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(list_params),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_job(r) for r in rows], total
+
     async def list_jobs_by_statuses(
         self,
         statuses: tuple[JobStatus, ...],

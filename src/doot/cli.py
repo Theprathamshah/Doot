@@ -8,6 +8,7 @@ from typing import Annotated, Any, TypeVar
 
 import httpx
 import typer
+import uvicorn
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -39,6 +40,7 @@ from doot.pipeline import (
     sync_watchlist_from_yaml,
 )
 from doot.rag import collect_evidence_chunks, load_stories_markdown, tailor_for_job
+from doot.web import create_web_app
 
 T = TypeVar("T")
 
@@ -929,6 +931,25 @@ def outreach(
             "[yellow]Draft saved (dry-run). Pass `--send` with DOOT_DRY_RUN=false "
             "and SMTP configured to send.[/yellow]"
         )
+
+
+@app.command()
+def ui(
+    host: Annotated[str, typer.Option("--host", help="Bind host.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Bind port.")] = 8765,
+    open_browser: Annotated[
+        bool,
+        typer.Option("--open/--no-open", help="Open dashboard URL in default browser."),
+    ] = True,
+) -> None:
+    """Launch the local web dashboard to view all jobs, selected roles, and apply directly."""
+    settings = _load_settings()
+    url = f"http://{host}:{port}"
+    console.print(f"[green]Starting Doot Web UI at[/green] {url}")
+    if open_browser:
+        webbrowser.open(url)
+    web_app = create_web_app(settings)
+    uvicorn.run(web_app, host=host, port=port, log_level="warning")
 
 
 @app.command("pipeline-run")
