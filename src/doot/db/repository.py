@@ -352,6 +352,52 @@ class DootRepository:
         rows = await cursor.fetchall()
         return [_row_to_job(r) for r in rows]
 
+    async def list_jobs_by_statuses(
+        self,
+        statuses: tuple[JobStatus, ...],
+        *,
+        min_score: int = 1,
+        limit: int = 50,
+    ) -> list[JobRecord]:
+        """List jobs matching any of the given statuses and minimum LLM score."""
+        if not statuses:
+            return []
+        placeholders = ", ".join("?" for _ in statuses)
+        params: list[Any] = [s.value for s in statuses]
+        params.extend([min_score, limit])
+        cursor = await self.conn.execute(
+            f"""
+            SELECT * FROM jobs
+            WHERE status IN ({placeholders})
+              AND COALESCE(llm_score, 0) >= ?
+            ORDER BY COALESCE(llm_score, 0) DESC, alert_only ASC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_job(r) for r in rows]
+
+    async def mark_jobs_notified(
+        self,
+        job_ids: list[int],
+        *,
+        actor: str = "digest",
+    ) -> int:
+        """Transition SCORED jobs to NOTIFIED and return the number transitioned."""
+        count = 0
+        for job_id in job_ids:
+            job = await self.get_job(job_id)
+            if job is not None and job.status == JobStatus.SCORED:
+                await self.transition_job(
+                    job_id,
+                    JobStatus.NOTIFIED,
+                    actor=actor,
+                    reason="included in digest",
+                )
+                count += 1
+        return count
+
     async def transition_job(
         self,
         job_id: int,

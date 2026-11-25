@@ -1,6 +1,7 @@
 """Typer CLI entrypoints for Doot."""
 
 import asyncio
+import webbrowser
 from collections.abc import Coroutine
 from pathlib import Path
 from typing import Annotated, Any, TypeVar
@@ -16,7 +17,8 @@ from doot.config import DootSettings
 from doot.db import DootRepository, InvalidStateTransitionError, initialize_schema, open_connection
 from doot.kill_switch import SafetyGuardError, assert_not_stopped, get_safety_status
 from doot.logging import configure_logging
-from doot.models.enums import ATSProvider, JobStatus
+from doot.models.enums import ATSProvider, JobStatus, RunStatus, RunType
+from doot.notify import dispatch_one_way_alert, render_digest_table, render_job_panel
 from doot.pipeline import (
     add_company_from_target,
     load_resume_markdown,
@@ -130,12 +132,25 @@ def stats() -> None:
 
 def _transition_command(job_id: int, target: JobStatus, reason: str) -> None:
     settings = _load_settings()
-    assert_not_stopped(settings)
+    try:
+        assert_not_stopped(settings)
+    except SafetyGuardError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
     async def _transition() -> None:
         async with open_connection(settings.db_path) as conn:
             await initialize_schema(conn)
             repo = DootRepository(conn)
+            if target == JobStatus.APPLIED:
+                current = await repo.get_job(job_id)
+                if current is not None and current.status == JobStatus.SCORED:
+                    await repo.transition_job(
+                        job_id,
+                        JobStatus.NOTIFIED,
+                        actor="cli",
+                        reason="surfaced before marking applied",
+                    )
             await repo.transition_job(job_id, target, actor="cli", reason=reason)
 
     try:
@@ -374,3 +389,144 @@ def score(
     table.add_row("Gemini API Calls", str(summary.llm_calls))
     table.add_row("Failed", str(summary.failed))
     console.print(table)
+
+
+@app.command()
+def digest(
+    min_score: Annotated[
+        int | None,
+        typer.Option("--min-score", help="Minimum LLM score (defaults to DOOT_MIN_DIGEST_SCORE)."),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Maximum jobs to display."),
+    ] = 25,
+    notify: Annotated[
+        bool,
+        typer.Option("--notify/--no-notify", help="Send one-way alert using DOOT_NOTIFY_METHOD."),
+    ] = False,
+    mark_notified: Annotated[
+        bool,
+        typer.Option("--mark-notified/--no-mark-notified", help="Transition SCORED -> NOTIFIED."),
+    ] = True,
+) -> None:
+    """Display ranked matching jobs and optionally send a one-way alert."""
+    settings = _load_settings()
+    threshold = min_score if min_score is not None else settings.min_digest_score
+
+    async def _digest() -> tuple[list[Any], int, bool]:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            run_id = await repo.start_run(RunType.DIGEST)
+            try:
+                jobs = await repo.list_jobs_by_statuses(
+                    (JobStatus.SCORED, JobStatus.NOTIFIED),
+                    min_score=threshold,
+                    limit=limit,
+                )
+                sent = False
+                if notify and jobs:
+                    sent = await dispatch_one_way_alert(settings, jobs)
+                transitioned = 0
+                if mark_notified and (notify or jobs):
+                    transitioned = await repo.mark_jobs_notified([j.id for j in jobs])
+                await repo.finish_run(
+                    run_id,
+                    status=RunStatus.SUCCESS,
+                    stats={"jobs": len(jobs), "notified": transitioned, "alert_sent": sent},
+                )
+                return jobs, transitioned, sent
+            except Exception as exc:
+                await repo.finish_run(run_id, status=RunStatus.FAILED, error_message=str(exc))
+                raise
+
+    jobs, transitioned, sent = _run_async(_digest())
+    render_digest_table(jobs, console)
+    if transitioned:
+        console.print(f"[dim]Transitioned {transitioned} SCORED job(s) to NOTIFIED.[/dim]")
+    if notify:
+        msg = "Alert sent." if sent else "No alert sent (empty or disabled)."
+        console.print(f"[dim]{msg}[/dim]")
+
+
+@app.command()
+def review(
+    min_score: Annotated[
+        int | None,
+        typer.Option("--min-score", help="Minimum score for review queue."),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Maximum jobs in queue."),
+    ] = 20,
+) -> None:
+    """Interactively triage ranked jobs ([s]kip, [a]pplied, [o]pen, [n]ext, [q]uit)."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+    except SafetyGuardError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    threshold = min_score if min_score is not None else settings.min_digest_score
+
+    async def _load_queue() -> list[Any]:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            return await repo.list_jobs_by_statuses(
+                (JobStatus.SCORED, JobStatus.NOTIFIED, JobStatus.NEEDS_MANUAL_ACTION),
+                min_score=threshold,
+                limit=limit,
+            )
+
+    queue = _run_async(_load_queue())
+    if not queue:
+        console.print("[yellow]Review queue is empty.[/yellow]")
+        return
+
+    for job in queue:
+        render_job_panel(job, console)
+        while True:
+            choice = (
+                typer.prompt(
+                    "Action ([s]kip / [a]pplied / [o]pen / [n]ext / [q]uit)",
+                    default="n",
+                )
+                .strip()
+                .lower()
+            )
+            if choice in ("q", "quit"):
+                console.print("Exiting review.")
+                return
+            if choice in ("n", "next"):
+                break
+            if choice in ("o", "open"):
+                webbrowser.open(job.apply_url)
+                console.print(f"[dim]Opened {job.apply_url}[/dim]")
+                continue
+            if choice in ("s", "skip"):
+                _transition_command(job.id, JobStatus.SKIPPED, "skipped during CLI review")
+                break
+            if choice in ("a", "applied"):
+                _transition_command(job.id, JobStatus.APPLIED, "applied during CLI review")
+                break
+            console.print("[yellow]Invalid choice. Use s, a, o, n, or q.[/yellow]")
+
+
+@app.command("pipeline-run")
+def pipeline_run(
+    ats: Annotated[bool, typer.Option("--ats/--no-ats")] = True,
+    dork: Annotated[bool, typer.Option("--dork/--no-dork")] = False,
+    jobspy: Annotated[bool, typer.Option("--jobspy/--no-jobspy")] = False,
+    notify: Annotated[bool, typer.Option("--notify/--no-notify")] = True,
+) -> None:
+    """Run discover -> score -> digest end-to-end (for macOS LaunchAgent schedules)."""
+    discover(ats=ats, dork=dork, jobspy=jobspy, limit_companies=None)
+    settings = _load_settings()
+    if settings.profile_path.exists():
+        score(limit=200, stage1_only=False)
+    else:
+        console.print("[yellow]Skipping score: data/profile.json not found.[/yellow]")
+    digest(min_score=None, limit=25, notify=notify, mark_notified=True)

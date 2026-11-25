@@ -49,8 +49,13 @@ class DootSettings(BaseSettings):
     jobspy_timeout_seconds: float = Field(default=45.0, ge=5.0)
 
     # Optional one-way notifications (Phase 4)
-    notify_method: str = "macos"
+    notify_method: str = "macos"  # macos | webhook | email | none
     notify_webhook_url: str = ""
+    notify_smtp_host: str = ""
+    notify_smtp_port: int = 587
+    notify_email_from: str = ""
+    notify_email_to: str = ""
+    notify_email_password: SecretStr = SecretStr("")
 
     # Profile & safety guardrails
     profile_version: str = "v1"
@@ -86,5 +91,6 @@ class DootSettings(BaseSettings):
             self.serper_api_key.get_secret_value(),
             self.brave_api_key.get_secret_value(),
             self.tavily_api_key.get_secret_value(),
+            self.notify_email_password.get_secret_value(),
         ]
         return [s for s in candidates if s]
