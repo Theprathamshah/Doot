@@ -1,0 +1,15 @@
+# Seed watchlist of companies using public Greenhouse / Lever / Ashby boards.
+# Copy to data/companies.yaml and customize.
+
+companies:
+  - name: Razorpay
+    ats_provider: greenhouse
+    board_token: razorpaysoftwareprivatelimited
+    careers_url: https://razorpay.com/jobs/
+    is_blocklisted: false
+
+  - name: Postman
+    ats_provider: greenhouse
+    board_token: postman
+    careers_url: https://www.postman.com/company/careers/
+    is_blocklisted: false

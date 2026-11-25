@@ -1,0 +1,30 @@
+{
+  "profile_version": "v1",
+  "full_name": "Your Name",
+  "email": "you@example.com",
+  "phone": "+91-0000000000",
+  "location": "Bengaluru, India",
+  "work_authorization_india": "Authorized to work in India without sponsorship",
+  "requires_us_visa": true,
+  "years_of_experience": 2.5,
+  "current_ctc_lpa": 0.0,
+  "expected_ctc_lpa": 22.0,
+  "notice_period_days": 30,
+  "notice_negotiable": true,
+  "preferred_work_modes": ["remote", "hybrid"],
+  "preferred_locations": ["Bengaluru", "Hyderabad", "Pune", "Ahmedabad", "Remote", "India"],
+  "target_roles": [
+    "Backend Engineer",
+    "Full Stack Engineer",
+    "Software Engineer",
+    "AI Engineer"
+  ],
+  "links": {
+    "linkedin": "https://linkedin.com/in/example",
+    "github": "https://github.com/example",
+    "portfolio": "https://example.dev"
+  },
+  "resume_pdf_path": "./data/resume.pdf",
+  "resume_md_path": "./data/resume.md",
+  "stories_md_path": "./data/stories.md"
+}

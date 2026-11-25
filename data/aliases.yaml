@@ -1,0 +1,71 @@
+# Canonical field mapping for ATS forms (case-insensitive substring match on field label).
+# LLM is NEVER allowed to answer compensation, notice period, visa, or EEO questions.
+
+field_aliases:
+  full_name:
+    - "full name"
+    - "your name"
+  first_name:
+    - "first name"
+  last_name:
+    - "last name"
+  email:
+    - "email"
+    - "e-mail"
+  phone:
+    - "phone"
+    - "mobile"
+    - "contact number"
+  location:
+    - "current location"
+    - "city"
+    - "where are you based"
+  linkedin:
+    - "linkedin"
+  github:
+    - "github"
+  portfolio:
+    - "portfolio"
+    - "personal website"
+    - "website"
+  current_ctc_lpa:
+    - "current ctc"
+    - "current salary"
+    - "current compensation"
+  expected_ctc_lpa:
+    - "expected ctc"
+    - "expected salary"
+    - "desired compensation"
+    - "salary expectation"
+  notice_period_days:
+    - "notice period"
+    - "how soon can you join"
+    - "earliest start date"
+  years_of_experience:
+    - "years of experience"
+    - "total experience"
+    - "relevant experience"
+  work_authorization_india:
+    - "authorized to work in india"
+    - "work authorization"
+
+# Labels containing any of these phrases are blocked from LLM free-text generation.
+llm_blocked_keywords:
+  - "salary"
+  - "ctc"
+  - "compensation"
+  - "pay"
+  - "notice"
+  - "visa"
+  - "sponsorship"
+  - "authorized to work"
+  - "citizenship"
+  - "gender"
+  - "race"
+  - "ethnicity"
+  - "veteran"
+  - "disability"
+  - "eeo"
+  - "criminal"
+  - "conviction"
+  - "age"

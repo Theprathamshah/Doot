@@ -1,0 +1,35 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Secrets & local user data
+.env
+.env.*
+!.env.example
+data/doot.db*
+data/profile.json
+data/resume.md
+data/resume.pdf
+data/stories.md
+data/companies.yaml
+data/STOP
+data/screenshots/
+logs/
+*.log
+
+# Playwright / browser profiles
+.playwright-profile/
+
+# macOS
+.DS_Store
+
+# Docs
+docs/
