@@ -13,7 +13,7 @@ from doot.models.enums import (
     RunStatus,
     RunType,
 )
-from doot.models.job import CompanyRecord, JobPosting, JobRecord, ScoreResult
+from doot.models.job import CompanyRecord, JobPosting, JobRecord, ScoreResult, TailoredAssets
 
 
 class InvalidStateTransitionError(ValueError):
@@ -539,6 +539,45 @@ class DootRepository:
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def upsert_application_tailoring(
+        self,
+        job_id: int,
+        assets: TailoredAssets,
+        *,
+        resume_path: str | None = None,
+    ) -> None:
+        """Store or refresh RAG-tailored assets for a job in applications."""
+        await self.conn.execute(
+            """
+            INSERT INTO applications (
+                job_id, status, tailored_summary, cover_note, outreach_note, resume_path
+            ) VALUES (?, 'PREPARED', ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                tailored_summary = excluded.tailored_summary,
+                cover_note = excluded.cover_note,
+                outreach_note = excluded.outreach_note,
+                resume_path = COALESCE(excluded.resume_path, applications.resume_path),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            """,
+            (
+                job_id,
+                assets.tailored_summary,
+                assets.cover_note,
+                assets.outreach_dm,
+                resume_path,
+            ),
+        )
+        await self.conn.commit()
+
+    async def get_application(self, job_id: int) -> dict[str, Any] | None:
+        """Fetch stored application/tailoring metadata for a job."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM applications WHERE job_id = ?",
+            (job_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row is not None else None
 
     async def count_automated_applies_today(self) -> int:
         """Count automated applications submitted today (UTC date)."""

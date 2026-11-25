@@ -9,6 +9,7 @@ from typing import Annotated, Any, TypeVar
 import httpx
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from doot.collectors import DomainRateLimiter
@@ -16,7 +17,9 @@ from doot.collectors.dork import build_search_provider
 from doot.config import DootSettings
 from doot.db import DootRepository, InvalidStateTransitionError, initialize_schema, open_connection
 from doot.kill_switch import SafetyGuardError, assert_not_stopped, get_safety_status
+from doot.llm import build_llm_provider
 from doot.logging import configure_logging
+from doot.mcp_server import create_mcp_server
 from doot.models.enums import ATSProvider, JobStatus, RunStatus, RunType
 from doot.notify import dispatch_one_way_alert, render_digest_table, render_job_panel
 from doot.pipeline import (
@@ -27,6 +30,7 @@ from doot.pipeline import (
     run_scoring_pipeline,
     sync_watchlist_from_yaml,
 )
+from doot.rag import load_stories_markdown, tailor_for_job
 
 T = TypeVar("T")
 
@@ -450,6 +454,36 @@ def digest(
         console.print(f"[dim]{msg}[/dim]")
 
 
+def _render_tailored_assets(job_id: int, assets: Any) -> None:
+    citations = ", ".join(assets.cited_story_ids) if assets.cited_story_ids else "none"
+    console.print(Panel(assets.tailored_summary, title=f"Job #{job_id} — Tailored Summary"))
+    console.print(Panel(assets.cover_note, title=f"Job #{job_id} — Cover Note"))
+    console.print(Panel(assets.outreach_dm, title=f"Job #{job_id} — Recruiter Outreach DM"))
+    console.print(f"[dim]Verified Evidence Citations: {citations}[/dim]")
+
+
+def _run_tailor(settings: DootSettings, job_id: int) -> Any:
+    profile = load_user_profile(settings)
+    resume_md = load_resume_markdown(profile, settings)
+    stories_md = load_stories_markdown(profile, settings)
+    provider = build_llm_provider(settings)
+
+    async def _tailor() -> Any:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            return await tailor_for_job(
+                repo,
+                provider,
+                job_id=job_id,
+                profile=profile,
+                resume_markdown=resume_md,
+                stories_markdown=stories_md,
+            )
+
+    return _run_async(_tailor())
+
+
 @app.command()
 def review(
     min_score: Annotated[
@@ -461,7 +495,7 @@ def review(
         typer.Option("--limit", help="Maximum jobs in queue."),
     ] = 20,
 ) -> None:
-    """Interactively triage ranked jobs ([s]kip, [a]pplied, [o]pen, [n]ext, [q]uit)."""
+    """Interactively triage ranked jobs ([t]ailor, [s]kip, [a]pplied, [o]pen, [n]ext, [q]uit)."""
     settings = _load_settings()
     try:
         assert_not_stopped(settings)
@@ -491,7 +525,7 @@ def review(
         while True:
             choice = (
                 typer.prompt(
-                    "Action ([s]kip / [a]pplied / [o]pen / [n]ext / [q]uit)",
+                    "Action ([t]ailor / [s]kip / [a]pplied / [o]pen / [n]ext / [q]uit)",
                     default="n",
                 )
                 .strip()
@@ -502,6 +536,13 @@ def review(
                 return
             if choice in ("n", "next"):
                 break
+            if choice in ("t", "tailor"):
+                try:
+                    assets = _run_tailor(settings, job.id)
+                    _render_tailored_assets(job.id, assets)
+                except (FileNotFoundError, LookupError, ValueError) as exc:
+                    console.print(f"[red]Tailor error:[/red] {exc}")
+                continue
             if choice in ("o", "open"):
                 webbrowser.open(job.apply_url)
                 console.print(f"[dim]Opened {job.apply_url}[/dim]")
@@ -512,7 +553,31 @@ def review(
             if choice in ("a", "applied"):
                 _transition_command(job.id, JobStatus.APPLIED, "applied during CLI review")
                 break
-            console.print("[yellow]Invalid choice. Use s, a, o, n, or q.[/yellow]")
+            console.print("[yellow]Invalid choice. Use t, s, a, o, n, or q.[/yellow]")
+
+
+@app.command()
+def tailor(
+    job_id: Annotated[int, typer.Argument(help="Database ID of the job to tailor for.")],
+) -> None:
+    """Generate RAG-grounded summary, cover note, and outreach DM for a job."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+        assets = _run_tailor(settings, job_id)
+    except (SafetyGuardError, FileNotFoundError, LookupError, ValueError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _render_tailored_assets(job_id, assets)
+
+
+@app.command()
+def mcp() -> None:
+    """Run Doot's Model Context Protocol (MCP) server over stdio."""
+    settings = _load_settings()
+    server = create_mcp_server(settings)
+    server.run(transport="stdio")
 
 
 @app.command("pipeline-run")
