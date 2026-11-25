@@ -133,6 +133,65 @@ class DootRepository:
         rows = await cursor.fetchall()
         return [_row_to_company(r) for r in rows]
 
+    async def get_company_by_ats(
+        self,
+        ats_provider: ATSProvider,
+        board_token: str,
+    ) -> CompanyRecord | None:
+        """Fetch a company by ATS provider and board token."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM companies WHERE ats_provider = ? AND board_token = ?",
+            (ats_provider.value, board_token),
+        )
+        row = await cursor.fetchone()
+        return _row_to_company(row) if row is not None else None
+
+    async def record_company_crawl_success(self, company_id: int) -> None:
+        """Reset failure streak and update last_crawled_at after a successful fetch."""
+        await self.conn.execute(
+            """
+            UPDATE companies
+            SET consecutive_failures = 0,
+                last_crawled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ?
+            """,
+            (company_id,),
+        )
+        await self.conn.commit()
+
+    async def record_company_crawl_failure(
+        self,
+        company_id: int,
+        *,
+        max_failures: int = 5,
+    ) -> bool:
+        """Increment failure counter and auto-pause the board once threshold is hit.
+
+        Returns True if the board was deactivated.
+        """
+        cursor = await self.conn.execute(
+            "SELECT consecutive_failures FROM companies WHERE id = ?",
+            (company_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return False
+        new_failures = int(row["consecutive_failures"]) + 1
+        deactivated = new_failures >= max_failures
+        await self.conn.execute(
+            """
+            UPDATE companies
+            SET consecutive_failures = ?,
+                is_active = CASE WHEN ? THEN 0 ELSE is_active END,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ?
+            """,
+            (new_failures, int(deactivated), company_id),
+        )
+        await self.conn.commit()
+        return deactivated
+
     async def upsert_job(self, job: JobPosting, *, actor: str = "system") -> tuple[int, bool]:
         """Insert a new job (with initial DISCOVERED event) or refresh an existing one.
 
@@ -241,6 +300,24 @@ class DootRepository:
     async def get_job(self, job_id: int) -> JobRecord | None:
         """Fetch a single job by primary key."""
         cursor = await self.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        row = await cursor.fetchone()
+        return _row_to_job(row) if row is not None else None
+
+    async def get_job_by_ats_key(
+        self,
+        ats_provider: ATSProvider,
+        board_token: str,
+        external_job_id: str,
+    ) -> JobRecord | None:
+        """Fetch a job matching an ATS identity regardless of discovery source."""
+        cursor = await self.conn.execute(
+            """
+            SELECT * FROM jobs
+            WHERE ats_provider = ? AND board_token = ? AND external_job_id = ?
+            LIMIT 1
+            """,
+            (ats_provider.value, board_token, external_job_id),
+        )
         row = await cursor.fetchone()
         return _row_to_job(row) if row is not None else None
 

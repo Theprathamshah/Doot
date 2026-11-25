@@ -25,11 +25,28 @@ class DootSettings(BaseSettings):
     gemini_api_key: SecretStr = SecretStr("")
     gemini_model: str = "gemini-2.5-flash"
 
-    # Search dorking configuration (Phase 2)
+    # Discovery configuration (Phase 2)
     search_provider: str = "serper"
     serper_api_key: SecretStr = SecretStr("")
     brave_api_key: SecretStr = SecretStr("")
     tavily_api_key: SecretStr = SecretStr("")
+    ats_max_consecutive_failures: int = Field(default=5, ge=1, le=50)
+    ats_min_interval_seconds: float = Field(default=1.0, ge=0.0)
+    dork_days: int = Field(default=7, ge=1, le=30)
+    dork_max_results: int = Field(default=20, ge=1, le=50)
+    jobspy_enabled: bool = False
+    jobspy_sites: list[str] = Field(default_factory=lambda: ["linkedin", "indeed", "naukri"])
+    jobspy_search_terms: list[str] = Field(
+        default_factory=lambda: [
+            "Backend Software Engineer AWS",
+            "Full Stack Engineer Java Node",
+            "AI Engineer LLM RAG",
+        ]
+    )
+    jobspy_location: str = "India"
+    jobspy_hours_old: int = Field(default=24, ge=1, le=168)
+    jobspy_results_wanted: int = Field(default=20, ge=1, le=100)
+    jobspy_timeout_seconds: float = Field(default=45.0, ge=5.0)
 
     # Optional one-way notifications (Phase 4)
     notify_method: str = "macos"
@@ -51,6 +68,16 @@ class DootSettings(BaseSettings):
     def profile_path(self) -> Path:
         """Default path to user profile JSON."""
         return self.data_dir / "profile.json"
+
+    @property
+    def companies_path(self) -> Path:
+        """Default path to companies watchlist YAML."""
+        return self.data_dir / "companies.yaml"
+
+    @property
+    def dork_queries_path(self) -> Path:
+        """Default path to search dork queries YAML."""
+        return self.data_dir / "dork_queries.yaml"
 
     def secret_values(self) -> list[str]:
         """Return non-empty secret strings for log redaction."""

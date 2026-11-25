@@ -1,0 +1,7 @@
+# Rotating search dork queries for hybrid "Dork-to-Crawl" discovery.
+# Copy to data/dork_queries.yaml and customize.
+
+queries:
+  - '(site:boards.greenhouse.io OR site:job-boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com) ("India" OR "Bengaluru" OR "Remote") ("AWS" OR "Spring Boot" OR "Node.js" OR "Distributed Systems")'
+  - '(site:jobs.ashbyhq.com OR site:jobs.lever.co OR site:job-boards.greenhouse.io) ("India" OR "Remote") ("LLM" OR "RAG" OR "MCP" OR "AI Engineer" OR "Agents")'
+  - 'site:wellfound.com/jobs ("India" OR "Remote") ("Backend" OR "Full Stack") ("AWS" OR "Java" OR "TypeScript")'

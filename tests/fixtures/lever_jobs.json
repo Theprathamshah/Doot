@@ -1,0 +1,19 @@
+[
+  {
+    "id": "lever-abc-1",
+    "text": "Full Stack Engineer (Node + React)",
+    "hostedUrl": "https://jobs.lever.co/beta/lever-abc-1",
+    "applyUrl": "https://jobs.lever.co/beta/lever-abc-1/apply",
+    "workplaceType": "remote",
+    "categories": {
+      "location": "Remote - India"
+    },
+    "descriptionPlain": "Ship distributed Node.js and React apps.",
+    "lists": [
+      {
+        "text": "Requirements",
+        "content": "<ul><li>2+ years experience</li><li>AWS SQS</li></ul>"
+      }
+    ]
+  }
+]

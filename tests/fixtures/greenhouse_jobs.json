@@ -1,0 +1,18 @@
+{
+  "jobs": [
+    {
+      "id": 1001,
+      "title": "Senior Backend Engineer (AWS)",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/1001",
+      "location": {"name": "Bengaluru, India"},
+      "content": "&lt;p&gt;Build &lt;strong&gt;event-driven&lt;/strong&gt; AWS Lambda systems.&lt;/p&gt;"
+    },
+    {
+      "id": 1002,
+      "title": "Staff Platform Engineer",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/1002",
+      "location": {"name": "San Francisco, CA"},
+      "content": "&lt;p&gt;On-site US role.&lt;/p&gt;"
+    }
+  ]
+}

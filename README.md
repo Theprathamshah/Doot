@@ -9,16 +9,21 @@ Local-first **Job Search Triage, RAG-Grounded Resume Tailoring, MCP Server, and 
 - [LLD.md](LLD.md) — SQLite WAL schema, enforced state machine, `Protocol` contracts, and config
 - [PLAN.md](PLAN.md) — Phased implementation roadmap
 
-## Phase 1: Quick Start
+## Phase 1 & 2: Quick Start
 
-1. Copy `.env.example` to `.env` (`chmod 600 .env`) and copy `data/profile.example.json` to `data/profile.json`.
-2. Initialize the database and verify setup:
+1. Copy `.env.example` to `.env` (`chmod 600 .env`), `data/profile.example.json` to `data/profile.json`, and `data/companies.example.yaml` to `data/companies.yaml`.
+2. Initialize and sync your watchlist:
    ```bash
    uv sync
    uv run doot init
-   uv run doot status
+   uv run doot sync-watchlist
+   uv run doot add-company https://boards.greenhouse.io/postman --name Postman
+   uv run doot discover --ats
    uv run doot stats
    ```
+   Optional discovery modes:
+   - Hybrid Dork-to-Crawl: `uv run doot discover --dork --ats` (requires `DOOT_SERPER_API_KEY` / `DOOT_BRAVE_API_KEY` / `DOOT_TAVILY_API_KEY`)
+   - Logged-out JobSpy (requires `uv sync --extra jobspy`): `uv run doot discover --jobspy`
 3. Run the offline test suite:
    ```bash
    uv run pytest

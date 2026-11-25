@@ -2,17 +2,26 @@
 
 import asyncio
 from collections.abc import Coroutine
-from typing import Any, TypeVar
+from pathlib import Path
+from typing import Annotated, Any, TypeVar
 
+import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from doot.collectors import DomainRateLimiter
+from doot.collectors.dork import build_search_provider
 from doot.config import DootSettings
 from doot.db import DootRepository, InvalidStateTransitionError, initialize_schema, open_connection
-from doot.kill_switch import assert_not_stopped, get_safety_status
+from doot.kill_switch import SafetyGuardError, assert_not_stopped, get_safety_status
 from doot.logging import configure_logging
-from doot.models.enums import JobStatus
+from doot.models.enums import ATSProvider, JobStatus
+from doot.pipeline import (
+    add_company_from_target,
+    run_discovery_pipeline,
+    sync_watchlist_from_yaml,
+)
 
 T = TypeVar("T")
 
@@ -168,3 +177,144 @@ def resume() -> None:
         console.print("[green]Kill switch removed.[/green]")
     else:
         console.print("Kill switch is not active.")
+
+
+@app.command("sync-watchlist")
+def sync_watchlist(
+    path: Annotated[
+        Path | None,
+        typer.Argument(help="Path to companies YAML watchlist."),
+    ] = None,
+) -> None:
+    """Load or refresh companies from data/companies.yaml into SQLite."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+    except SafetyGuardError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    target_path = path or settings.companies_path
+
+    async def _sync() -> int:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            return await sync_watchlist_from_yaml(repo, target_path)
+
+    try:
+        count = _run_async(_sync())
+    except FileNotFoundError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[green]Synced {count} companies from {target_path}[/green]")
+
+
+@app.command("add-company")
+def add_company(
+    target: Annotated[
+        str,
+        typer.Argument(help="Careers URL, ATS board URL, or label."),
+    ],
+    ats: Annotated[
+        ATSProvider | None,
+        typer.Option("--ats", help="Explicit ATS provider."),
+    ] = None,
+    token: Annotated[
+        str | None,
+        typer.Option("--token", help="Explicit ATS board token."),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option("--name", help="Display company name."),
+    ] = None,
+) -> None:
+    """Auto-detect Greenhouse/Lever/Ashby board from a URL and add to watchlist."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+    except SafetyGuardError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    async def _add() -> tuple[int, ATSProvider, str]:
+        async with (
+            open_connection(settings.db_path) as conn,
+            httpx.AsyncClient() as client,
+        ):
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            return await add_company_from_target(
+                repo,
+                target,
+                client=client,
+                name=name,
+                ats_provider=ats,
+                board_token=token,
+            )
+
+    try:
+        company_id, provider, board_token = _run_async(_add())
+    except (ValueError, httpx.HTTPError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[green]Added company #{company_id}:[/green] {provider.value}:{board_token}"
+    )
+
+
+@app.command()
+def discover(
+    ats: bool = typer.Option(True, "--ats/--no-ats", help="Poll active ATS JSON boards."),
+    dork: bool = typer.Option(False, "--dork/--no-dork", help="Run search-dork board discovery."),
+    jobspy: bool = typer.Option(False, "--jobspy/--no-jobspy", help="Run logged-out JobSpy."),
+    limit_companies: int | None = typer.Option(None, "--limit", help="Max ATS boards to poll."),
+) -> None:
+    """Run hybrid job discovery (Dork-to-Crawl + ATS JSON APIs + optional JobSpy)."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+    except SafetyGuardError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    async def _discover() -> Any:
+        rate_limiter = DomainRateLimiter(min_interval_seconds=settings.ats_min_interval_seconds)
+        async with (
+            open_connection(settings.db_path) as conn,
+            httpx.AsyncClient() as client,
+        ):
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            provider = build_search_provider(settings, client, rate_limiter) if dork else None
+            if dork and provider is None:
+                console.print(
+                    "[yellow]Warning:[/yellow] --dork enabled but no API key configured "
+                    f"for {settings.search_provider}; skipping dorks."
+                )
+            return await run_discovery_pipeline(
+                settings,
+                repo,
+                client=client,
+                rate_limiter=rate_limiter,
+                use_ats=ats,
+                use_dork=dork and provider is not None,
+                use_jobspy=jobspy or settings.jobspy_enabled,
+                limit_companies=limit_companies,
+                search_provider=provider,
+            )
+
+    summary = _run_async(_discover())
+    table = Table(title="Discovery Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count", justify="right")
+    table.add_row("ATS Boards Crawled", str(summary.companies_crawled))
+    table.add_row("ATS Boards Failed", str(summary.companies_failed))
+    table.add_row("ATS Boards Auto-Paused", str(summary.companies_paused))
+    table.add_row("New Boards via Dork", str(summary.new_boards_via_dork))
+    table.add_row("Jobs Created", str(summary.jobs_created))
+    table.add_row("Jobs Updated", str(summary.jobs_updated))
+    table.add_row("Cross-Source Deduped", str(summary.jobs_deduped_cross_source))
+    console.print(table)
