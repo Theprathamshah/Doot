@@ -19,7 +19,10 @@ from doot.logging import configure_logging
 from doot.models.enums import ATSProvider, JobStatus
 from doot.pipeline import (
     add_company_from_target,
+    load_resume_markdown,
+    load_user_profile,
     run_discovery_pipeline,
+    run_scoring_pipeline,
     sync_watchlist_from_yaml,
 )
 
@@ -317,4 +320,57 @@ def discover(
     table.add_row("Jobs Created", str(summary.jobs_created))
     table.add_row("Jobs Updated", str(summary.jobs_updated))
     table.add_row("Cross-Source Deduped", str(summary.jobs_deduped_cross_source))
+    console.print(table)
+
+
+@app.command()
+def score(
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Max DISCOVERED jobs to evaluate."),
+    ] = 200,
+    stage1_only: Annotated[
+        bool,
+        typer.Option("--stage1-only", help="Run only Stage 1 rule filter (zero LLM calls)."),
+    ] = False,
+) -> None:
+    """Run Stage 1 deterministic filtering and Stage 2 cached Gemini scoring."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+        profile = load_user_profile(settings)
+    except (SafetyGuardError, FileNotFoundError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    resume_md = load_resume_markdown(profile, settings)
+
+    async def _score() -> Any:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            return await run_scoring_pipeline(
+                settings,
+                repo,
+                profile=profile,
+                resume_markdown=resume_md,
+                limit=limit,
+                stage1_only=stage1_only,
+            )
+
+    try:
+        summary = _run_async(_score())
+    except ValueError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    table = Table(title="Scoring Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count", justify="right")
+    table.add_row("Evaluated", str(summary.evaluated))
+    table.add_row("Filtered Out (Stage 1)", str(summary.filtered_out))
+    table.add_row("Scored (Stage 2)", str(summary.scored))
+    table.add_row("Cache Hits", str(summary.cache_hits))
+    table.add_row("Gemini API Calls", str(summary.llm_calls))
+    table.add_row("Failed", str(summary.failed))
     console.print(table)

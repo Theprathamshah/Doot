@@ -9,16 +9,18 @@ Local-first **Job Search Triage, RAG-Grounded Resume Tailoring, MCP Server, and 
 - [LLD.md](LLD.md) — SQLite WAL schema, enforced state machine, `Protocol` contracts, and config
 - [PLAN.md](PLAN.md) — Phased implementation roadmap
 
-## Phase 1 & 2: Quick Start
+## Phase 1–3: Quick Start
 
-1. Copy `.env.example` to `.env` (`chmod 600 .env`), `data/profile.example.json` to `data/profile.json`, and `data/companies.example.yaml` to `data/companies.yaml`.
-2. Initialize and sync your watchlist:
+1. Copy `.env.example` to `.env` (`chmod 600 .env`), `data/profile.example.json` to `data/profile.json`, `data/resume.example.md` to `data/resume.md`, and `data/companies.example.yaml` to `data/companies.yaml`.
+2. Add your `DOOT_GEMINI_API_KEY` to `.env`, then initialize, discover, and score:
    ```bash
    uv sync
    uv run doot init
    uv run doot sync-watchlist
    uv run doot add-company https://boards.greenhouse.io/postman --name Postman
    uv run doot discover --ats
+   uv run doot score --stage1-only   # free rule filter only
+   uv run doot score                 # Stage 1 + cached Gemini scoring (PII redacted)
    uv run doot stats
    ```
    Optional discovery modes:

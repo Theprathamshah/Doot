@@ -13,7 +13,7 @@ from doot.models.enums import (
     RunStatus,
     RunType,
 )
-from doot.models.job import CompanyRecord, JobPosting, JobRecord
+from doot.models.job import CompanyRecord, JobPosting, JobRecord, ScoreResult
 
 
 class InvalidStateTransitionError(ValueError):
@@ -132,6 +132,12 @@ class DootRepository:
         cursor = await self.conn.execute(query)
         rows = await cursor.fetchall()
         return [_row_to_company(r) for r in rows]
+
+    async def get_company_by_id(self, company_id: int) -> CompanyRecord | None:
+        """Fetch a company by primary key."""
+        cursor = await self.conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,))
+        row = await cursor.fetchone()
+        return _row_to_company(row) if row is not None else None
 
     async def get_company_by_ats(
         self,
@@ -395,6 +401,89 @@ class DootRepository:
         updated = await self.get_job(job_id)
         assert updated is not None
         return updated
+
+    async def get_cached_score(self, score_cache_key: str) -> ScoreResult | None:
+        """Return a previously computed ScoreResult matching score_cache_key."""
+        cursor = await self.conn.execute(
+            """
+            SELECT llm_score, llm_reasoning, missing_skills_json, should_apply, india_eligible
+            FROM jobs
+            WHERE score_cache_key = ?
+              AND llm_score IS NOT NULL
+              AND llm_reasoning IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (score_cache_key,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        missing_raw = row["missing_skills_json"]
+        return ScoreResult(
+            score=int(row["llm_score"]),
+            should_apply=bool(row["should_apply"]),
+            reasoning=str(row["llm_reasoning"]),
+            missing_skills=json.loads(missing_raw) if missing_raw else [],
+            india_remote_eligible=bool(row["india_eligible"]),
+        )
+
+    async def mark_job_filtered_out(
+        self,
+        job_id: int,
+        reason: str,
+        *,
+        actor: str = "rule_filter",
+    ) -> JobRecord:
+        """Persist filter rejection reason and transition job to FILTERED_OUT."""
+        await self.conn.execute(
+            "UPDATE jobs SET rule_filter_reason = ? WHERE id = ?",
+            (reason, job_id),
+        )
+        return await self.transition_job(
+            job_id,
+            JobStatus.FILTERED_OUT,
+            actor=actor,
+            reason=reason,
+        )
+
+    async def save_job_score(
+        self,
+        job_id: int,
+        result: ScoreResult,
+        *,
+        score_cache_key: str,
+        actor: str = "scorer",
+    ) -> JobRecord:
+        """Persist LLM ScoreResult and transition job to SCORED."""
+        await self.conn.execute(
+            """
+            UPDATE jobs
+            SET llm_score = ?,
+                llm_reasoning = ?,
+                missing_skills_json = ?,
+                should_apply = ?,
+                india_eligible = ?,
+                score_cache_key = ?
+            WHERE id = ?
+            """,
+            (
+                result.score,
+                result.reasoning,
+                json.dumps(result.missing_skills),
+                int(result.should_apply),
+                int(result.india_remote_eligible),
+                score_cache_key,
+                job_id,
+            ),
+        )
+        return await self.transition_job(
+            job_id,
+            JobStatus.SCORED,
+            actor=actor,
+            reason=f"score={result.score}",
+            metadata={"should_apply": result.should_apply, "cache_key": score_cache_key},
+        )
 
     async def get_job_events(self, job_id: int) -> list[dict[str, Any]]:
         """Return chronological audit events for a job."""
