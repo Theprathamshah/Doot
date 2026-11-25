@@ -306,6 +306,13 @@ def discover(
         help="Poll free public remote/startup JSON feeds (Himalayas, Remotive, Jobicy, HN).",
     ),
     dork: bool = typer.Option(False, "--dork/--no-dork", help="Run search-dork board discovery."),
+    dork_priority: Annotated[
+        int,
+        typer.Option(
+            "--dork-priority",
+            help="Max dork priority level to run (1=ATS only, 2=+boards, 3=+social).",
+        ),
+    ] = 2,
     jobspy: bool = typer.Option(False, "--jobspy/--no-jobspy", help="Run logged-out JobSpy."),
     limit_companies: int | None = typer.Option(None, "--limit", help="Max ATS boards to poll."),
 ) -> None:
@@ -335,6 +342,7 @@ def discover(
                 use_feeds=feeds,
                 use_dork=dork and provider is not None,
                 use_jobspy=jobspy or settings.jobspy_enabled,
+                dork_max_priority=dork_priority,
                 limit_companies=limit_companies,
                 search_provider=provider,
             )
@@ -957,11 +965,19 @@ def pipeline_run(
     ats: Annotated[bool, typer.Option("--ats/--no-ats")] = True,
     feeds: Annotated[bool, typer.Option("--feeds/--no-feeds")] = True,
     dork: Annotated[bool, typer.Option("--dork/--no-dork")] = False,
+    dork_priority: Annotated[int, typer.Option("--dork-priority")] = 2,
     jobspy: Annotated[bool, typer.Option("--jobspy/--no-jobspy")] = False,
     notify: Annotated[bool, typer.Option("--notify/--no-notify")] = True,
 ) -> None:
     """Run discover -> score -> digest end-to-end (for macOS LaunchAgent schedules)."""
-    discover(ats=ats, feeds=feeds, dork=dork, jobspy=jobspy, limit_companies=None)
+    discover(
+        ats=ats,
+        feeds=feeds,
+        dork=dork,
+        dork_priority=dork_priority,
+        jobspy=jobspy,
+        limit_companies=None,
+    )
     settings = _load_settings()
     if settings.profile_path.exists():
         score(limit=200, stage1_only=False)

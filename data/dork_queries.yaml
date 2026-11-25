@@ -1,11 +1,146 @@
-# Rotating search dork queries focused on niche Wellfound, LinkedIn Remote, LinkedIn hiring posts, X/Twitter, and Indian startups.
+# Target: high-paying remote / hybrid backend & full-stack roles in India (2-6 yrs exp)
+# Stack fit: Java/Spring Boot, Node/TS, AWS, event-driven, distributed systems, WASM, LLM/RAG/MCP
+#
+# Usage notes:
+# - Doot appends `global.suffix` for Google/Serper/Brave/Tavily (omitted automatically on DDG fallback)
+#   and filters Priority <= `--dork-priority` (default 2; use `--dork-priority 3` for social posts).
 
-queries:
-  - 'site:wellfound.com/jobs Remote India Backend OR "Full Stack" AWS'
-  - 'site:wellfound.com/jobs Bengaluru OR Hyderabad Java OR Node OR Python'
-  - 'site:linkedin.com/jobs/view Remote India "Backend" OR "Full Stack" AWS'
-  - 'site:linkedin.com/posts hiring "Backend" OR "Full Stack" India OR Remote'
-  - 'site:x.com "hiring" ("Backend" OR "Full Stack" OR "AI Engineer") ("India" OR "Remote")'
-  - 'site:jobs.ashbyhq.com India OR Remote Backend OR Fullstack OR AI'
-  - 'site:job-boards.greenhouse.io India OR Bengaluru "Software Engineer" OR Backend'
-  - 'site:jobs.lever.co India OR Bengaluru "Software Engineer" OR Backend'
+global:
+  freshness_days: 7
+  max_results_per_query: 10     # Serper free tier rejects num > 10 on complex dork queries
+  suffix: '-intern -internship -trainee -fresher -"0-1 years" -"unpaid" -"walk-in" -"urgent hiring"'
+  reject_title_regex: '(?i)\b(intern|trainee|fresher|junior|sdet|qa|support|devops only|manager|director|vp)\b'
+  prefer_title_regex: '(?i)\b(backend|back-end|full[- ]?stack|software engineer|sde[- ]?(2|ii|3|iii)|platform|distributed|java|node)\b'
+  experience_window_years: [2, 6]
+  soft_min_ctc_lpa: 20
+  salary_signal_regex: '(?i)(₹|INR|LPA|CTC|\$|USD|per year|annual)'
+
+# ---------------------------------------------------------------------------
+# PRIORITY 1: ATS boards (direct apply pages)
+# ---------------------------------------------------------------------------
+ats_remote_india:
+  priority: 1
+  queries:
+    - 'site:jobs.ashbyhq.com ("India" OR "Remote - India" OR "India (Remote)") ("Backend Engineer" OR "Software Engineer" OR "Full Stack")'
+    - 'site:job-boards.greenhouse.io ("India" OR "Remote - India") ("Backend Engineer" OR "Software Engineer" OR "Full Stack") (AWS OR Java OR Node OR Python)'
+    - 'site:boards.greenhouse.io ("India" OR "Remote - India") ("Backend" OR "Full Stack" OR "SDE")'
+    - 'site:jobs.lever.co ("India" OR "Remote") ("Backend Engineer" OR "Software Engineer" OR "Full Stack") (AWS OR Java OR Node)'
+    - 'site:apply.workable.com ("India" OR "Remote") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - 'site:jobs.smartrecruiters.com ("India" OR "Remote") ("Senior Software Engineer" OR "Backend Engineer" OR "SDE")'
+    - 'site:ats.rippling.com ("India" OR "Remote") ("Backend" OR "Software Engineer" OR "Full Stack")'
+    - 'site:*.recruitee.com ("India" OR "Remote") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - 'site:*.breezy.hr ("India" OR "Remote") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - 'site:*.bamboohr.com/careers ("India" OR "Remote") ("Backend" OR "Software Engineer")'
+    - 'site:jobs.gem.com ("India" OR "Remote") ("Backend" OR "Software Engineer" OR "Full Stack")'
+    - 'site:careers.kula.ai OR site:*.pinpointhq.com ("India" OR "Remote") ("Backend" OR "Software Engineer")'
+
+ats_hybrid_cities:
+  priority: 1
+  queries:
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) ("Bengaluru" OR "Bangalore") ("Backend Engineer" OR "SDE II" OR "Senior Software Engineer") (Java OR "Spring Boot" OR Node OR AWS)'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) ("Hyderabad" OR "Pune") ("Backend Engineer" OR "SDE II" OR "Senior Software Engineer") (Java OR Node OR AWS)'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) ("Mumbai" OR "Gurugram" OR "Gurgaon" OR "Noida") ("Backend" OR "Full Stack" OR "Software Engineer") hybrid'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) ("Ahmedabad" OR "Gandhinagar" OR "GIFT City" OR "Gujarat") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co OR site:apply.workable.com) hybrid India ("Software Engineer" OR "Backend") ("event-driven" OR Kafka OR SQS OR microservices)'
+
+ats_global_remote_open_to_india:
+  priority: 1
+  queries:
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) ("Remote - APAC" OR "APAC" OR "Asia Pacific" OR "Anywhere") ("Backend Engineer" OR "Software Engineer" OR "Full Stack")'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) ("Remote" "India") ("Senior Backend" OR "Backend Engineer") (Java OR Go OR Node OR Python OR TypeScript)'
+    - '(site:jobs.ashbyhq.com OR site:apply.workable.com OR site:jobs.lever.co) ("work from anywhere" OR "fully remote" OR "remote-first") ("India" OR "APAC") ("Backend" OR "Full Stack")'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io) ("India" OR "APAC") ("Distributed Systems" OR "Platform Engineer" OR "Infrastructure") Remote'
+
+ats_niche_fit:
+  priority: 1
+  queries:
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) India (Remote OR Hybrid) ("event-driven" OR "event driven" OR Kafka OR EventBridge OR SQS) ("Backend" OR "Software Engineer")'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) India (Remote OR Hybrid) (WebAssembly OR WASM OR Rust OR "audio" OR "real-time") ("Software Engineer" OR "Full Stack")'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) India (Remote OR Hybrid) ("AI Engineer" OR "Applied AI" OR "LLM" OR "GenAI") ("Backend" OR "Software Engineer") (Python OR TypeScript OR Java)'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) India (Remote OR Hybrid) ("high throughput" OR "low latency" OR "distributed systems" OR "scalable") ("Backend Engineer" OR "SDE")'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) India (Remote OR Hybrid) ("Spring Boot" OR Quarkus OR "Project Loom" OR "virtual threads") Java ("Backend" OR "Software Engineer")'
+    - '(site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co) India (Remote OR Hybrid) ("fintech" OR "payments" OR "trading" OR "ledger") ("Backend Engineer" OR "SDE II")'
+
+# ---------------------------------------------------------------------------
+# PRIORITY 2: Boards / aggregators / startup platforms
+# ---------------------------------------------------------------------------
+startup_boards:
+  priority: 2
+  queries:
+    - 'site:wellfound.com/jobs ("Remote" OR "India") ("Backend Engineer" OR "Full Stack Engineer" OR "Software Engineer") (AWS OR Java OR Node OR Python)'
+    - 'site:wellfound.com/company/*/jobs ("Remote" OR "India") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - 'site:wellfound.com/jobs (Bengaluru OR Hyderabad OR Pune OR Mumbai OR Gurgaon) ("Backend" OR "Full Stack") (Java OR Node OR TypeScript OR Python)'
+    - 'site:wellfound.com/l/ ("India" OR "Remote") "Backend" ("₹" OR "LPA" OR "$")'
+    - 'site:workatastartup.com/jobs ("India" OR "Remote") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - 'site:ycombinator.com/companies ("India" OR "Remote") ("Backend" OR "Full Stack" OR "Software Engineer") jobs'
+    - 'site:cutshort.io/job ("Remote" OR "Hybrid") ("Backend" OR "Full Stack") (Java OR Node OR AWS) ("LPA" OR "Lacs")'
+    - 'site:instahyre.com/job ("Remote" OR "Hybrid") ("Backend" OR "Full Stack") (Java OR Node OR AWS)'
+    - 'site:hirist.tech ("Remote" OR "Hybrid") ("Backend" OR "Full Stack" OR "SDE") (Java OR Node OR AWS)'
+    - 'site:iimjobs.com OR site:hirist.tech ("Backend" OR "Software Engineer") ("Product" OR "Startup") ("Remote" OR "Hybrid") India'
+
+remote_boards:
+  priority: 2
+  queries:
+    - 'site:himalayas.app/jobs ("India" OR "Asia" OR "Worldwide") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - 'site:remoteok.com/remote-jobs ("Worldwide" OR "India" OR "Asia") ("Backend" OR "Full Stack" OR "Software Engineer")'
+    - 'site:weworkremotely.com/remote-jobs ("Anywhere in the World" OR "APAC" OR "Asia") ("Back-End" OR "Full-Stack")'
+    - 'site:remotive.com/remote-jobs ("Worldwide" OR "India" OR "APAC") ("Software Development" OR "Backend" OR "Full Stack")'
+    - 'site:jobs.workable.com ("India" OR "Remote") ("Backend" OR "Full Stack" OR "Software Engineer") ("Remote" OR "Hybrid")'
+    - 'site:arc.dev/remote-jobs OR site:turing.com/jobs ("India" OR "Asia") ("Backend" OR "Full Stack") (Java OR Node OR AWS)'
+
+mainstream_boards:
+  priority: 2
+  queries:
+    - 'site:linkedin.com/jobs/view ("Remote" OR "Hybrid") India ("Backend Engineer" OR "Software Engineer II" OR "Senior Software Engineer" OR "SDE II") (Java OR "Spring Boot" OR Node OR AWS)'
+    - 'site:linkedin.com/jobs/view "India" ("Remote") ("Full Stack Engineer" OR "Fullstack") (React OR "Next.js") (Node OR Java OR AWS)'
+    - 'site:in.linkedin.com/jobs/view ("Remote" OR "Hybrid") ("Backend" OR "Full Stack") ("event-driven" OR microservices OR "distributed systems")'
+    - 'site:naukri.com/job-listings ("Work from home" OR "Hybrid") ("Backend" OR "Full Stack" OR "Software Engineer") ("Spring Boot" OR Node OR AWS) ("Product" OR "Startup")'
+    - 'site:foundit.in/job ("Remote" OR "Hybrid") ("Backend" OR "Full Stack") (Java OR Node OR AWS)'
+    - 'site:glassdoor.co.in/job-listing ("Remote" OR "Hybrid") ("Backend" OR "Full Stack") (Java OR Node OR AWS)'
+    - 'site:indeed.com/viewjob ("Remote" OR "Hybrid") India ("Backend Developer" OR "Software Engineer" OR "Full Stack") (Java OR Node OR AWS)'
+
+careers_pages:
+  priority: 2
+  queries:
+    - 'inurl:careers ("Backend Engineer" OR "SDE II" OR "Senior Software Engineer") ("Bengaluru" OR "Hyderabad" OR "Pune") (Java OR "Spring Boot" OR Kafka) hybrid'
+    - 'inurl:careers ("Remote" OR "work from anywhere") India ("Backend Engineer" OR "Full Stack Engineer") (AWS OR Node OR Java)'
+    - 'intitle:careers ("Software Engineer" OR "Backend") India ("Remote" OR "Hybrid") ("microservices" OR "event-driven")'
+    - 'inurl:jobs ("Backend Engineer" OR "Software Engineer II") India ("Remote" OR "Hybrid") ("competitive salary" OR "ESOPs" OR "equity")'
+
+salary_signal:
+  priority: 2
+  queries:
+    - '("Backend Engineer" OR "Software Engineer" OR "SDE II") India (Remote OR Hybrid) ("LPA" OR "₹30" OR "₹40" OR "₹50" OR "30-50 LPA" OR "40 LPA")'
+    - '("Backend Engineer" OR "Full Stack Engineer") (Remote OR Hybrid) India ("$60k" OR "$80k" OR "$100k" OR "USD" OR "paid in USD")'
+    - '("Backend Engineer" OR "Software Engineer") India Remote ("ESOPs" OR "equity" OR "stock options") ("Series A" OR "Series B" OR "Series C" OR "funded")'
+
+# ---------------------------------------------------------------------------
+# PRIORITY 3: Social / community posts (unlisted roles, referrals, founders hiring)
+# ---------------------------------------------------------------------------
+social_posts:
+  priority: 3
+  queries:
+    - 'site:linkedin.com/posts ("we are hiring" OR "we''re hiring" OR "hiring") ("Backend Engineer" OR "Full Stack Engineer" OR "SDE II") (India OR Bengaluru OR Remote) ("apply" OR "DM" OR "send your resume")'
+    - 'site:linkedin.com/posts hiring ("Java" OR "Node.js" OR "AWS") ("Remote" OR "Hybrid") India ("2+ years" OR "3+ years" OR "2-5 years" OR "3-6 years")'
+    - 'site:linkedin.com/feed/update hiring ("Backend" OR "Full Stack") India ("Remote" OR "Hybrid") ("ESOPs" OR "competitive" OR "LPA")'
+    - 'site:x.com ("hiring" OR "we''re hiring") ("Backend" OR "Full Stack" OR "Software Engineer") ("India" OR "Bangalore" OR "Remote") ("DM" OR "apply")'
+    - 'site:news.ycombinator.com/item "Ask HN: Who is hiring" ("India" OR "APAC" OR "Remote") ("Backend" OR "Full Stack")'
+    - 'site:reddit.com/r/developersIndia ("hiring" OR "referral" OR "opening") ("Backend" OR "SDE") ("Remote" OR "Hybrid")'
+    - 'site:reddit.com/r/forhire OR site:reddit.com/r/remotejs ("Backend" OR "Full Stack") ("India" OR "Worldwide") hiring'
+    - 'site:github.com ("hiring" OR "we are hiring") ("India" OR "Remote") ("Backend" OR "Software Engineer") inurl:careers OR inurl:jobs'
+
+# ---------------------------------------------------------------------------
+# Target-company sweeps: high-paying product companies with India offices.
+# ---------------------------------------------------------------------------
+target_companies:
+  priority: 2
+  company_chunks:
+    - [Razorpay, PhonePe, Groww, CRED, Juspay, Zeta]
+    - [Postman, BrowserStack, Atlassian, Freshworks, Chargebee, Sprinklr]
+    - [Swiggy, Zomato, Zepto, Meesho, Flipkart, Myntra]
+    - [Rippling, Databricks, Cloudflare, MongoDB, Elastic, GitLab]
+    - [Uber, Intuit, Adobe, Salesforce, ServiceNow, Walmart]
+    - [Hasura, Whatfix, Rudderstack, Atlan, Mindtickle, Darwinbox]
+  templates:
+    - '{companies} ("Backend Engineer" OR "SDE II" OR "Software Engineer II" OR "Senior Software Engineer") India (Remote OR Hybrid) (careers OR jobs)'
+    - '{companies} ("Full Stack" OR "Platform Engineer") India (Remote OR Hybrid) (careers OR jobs)'

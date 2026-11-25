@@ -1,18 +1,24 @@
 """SearchProvider implementations for Serper, Brave Search, and Tavily."""
 
 import asyncio
+import re
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from loguru import logger
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from doot.collectors.ats.detector import detect_ats_from_url
 from doot.collectors.base import SearchHit, SearchProvider
 from doot.collectors.rate_limiter import DomainRateLimiter
 from doot.config import DootSettings
 
 _RETRYABLE_CODES = frozenset({429, 500, 502, 503, 504})
+_PRIMARY_DISABLE_STATUSES = frozenset({401, 402, 403, 429})
+_SERPER_FREE_MAX_NUM = 10
+_NEGATION_TERM_RE = re.compile(r'(?<!\S)-(?:"[^"]+"|\S+)')
 
 
 class TransientSearchError(RuntimeError):
@@ -69,6 +75,32 @@ def _days_to_brave_freshness(days: int) -> str:
     return "pm"
 
 
+def _resolve_serper_link(item: dict[str, Any]) -> str | None:
+    """Resolve Google `/goto?url=...` wrappers via query param or ATS displayedLink."""
+    link = str(item.get("link") or "").strip()
+    if not link:
+        return None
+    if not link.startswith("https://www.google.com/goto"):
+        return link
+    raw_url = parse_qs(urlparse(link).query).get("url", [""])[0]
+    decoded = unquote(raw_url).strip()
+    if decoded.startswith(("http://", "https://")) and not decoded.startswith(
+        "https://www.google.com/goto"
+    ):
+        return decoded
+    displayed = str(item.get("displayedLink") or "").strip()
+    if displayed:
+        clean_display = displayed.replace(" › ", "/").split()[0]
+        if detect_ats_from_url(clean_display) is not None:
+            return clean_display
+    return None
+
+
+def _simplify_query_for_ddg(query: str) -> str:
+    """Strip Google-style `-negation` flags that cause DuckDuckGo to return empty results."""
+    return " ".join(_NEGATION_TERM_RE.sub(" ", query).split())
+
+
 class SerperSearchProvider:
     """Google search results via Serper.dev JSON API."""
 
@@ -83,6 +115,21 @@ class SerperSearchProvider:
         self.api_key = api_key
         self.client = client
         self.rate_limiter = rate_limiter
+        self._max_num = 100
+
+    async def _post_query(self, query: str, *, days: int, num: int) -> Any:
+        return await _post_or_get_json(
+            self.client,
+            self.rate_limiter,
+            "POST",
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+            json_body={
+                "q": query,
+                "num": num,
+                "tbs": _days_to_google_tbs(days),
+            },
+        )
 
     async def search(
         self,
@@ -91,21 +138,25 @@ class SerperSearchProvider:
         days: int = 7,
         max_results: int = 20,
     ) -> list[SearchHit]:
-        payload = await _post_or_get_json(
-            self.client,
-            self.rate_limiter,
-            "POST",
-            "https://google.serper.dev/search",
-            headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
-            json_body={
-                "q": query,
-                "num": min(max_results, 100),
-                "tbs": _days_to_google_tbs(days),
-            },
-        )
+        requested_num = min(max_results, self._max_num)
+        try:
+            payload = await self._post_query(query, days=days, num=requested_num)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400 and requested_num > _SERPER_FREE_MAX_NUM:
+                logger.info(
+                    "Serper rejected num={}; clamping queries to num={} for free-tier limits.",
+                    requested_num,
+                    _SERPER_FREE_MAX_NUM,
+                )
+                self._max_num = _SERPER_FREE_MAX_NUM
+                payload = await self._post_query(
+                    query, days=days, num=min(max_results, _SERPER_FREE_MAX_NUM)
+                )
+            else:
+                raise
         hits: list[SearchHit] = []
         for item in payload.get("organic", [])[:max_results]:
-            link = str(item.get("link") or "").strip()
+            link = _resolve_serper_link(item)
             if not link:
                 continue
             hits.append(
@@ -257,7 +308,8 @@ class DuckDuckGoSearchProvider:
     ) -> list[SearchHit]:
         await self.rate_limiter.acquire("duckduckgo.com")
         timelimit = "d" if days <= 1 else ("w" if days <= 7 else "m")
-        rows = await asyncio.to_thread(self._run_sync, query, timelimit, max_results)
+        clean_query = _simplify_query_for_ddg(query)
+        rows = await asyncio.to_thread(self._run_sync, clean_query, timelimit, max_results)
         hits: list[SearchHit] = []
         for item in rows[:max_results]:
             link = str(item.get("href") or item.get("url") or "").strip()
@@ -274,6 +326,14 @@ class DuckDuckGoSearchProvider:
         return hits
 
 
+def _should_disable_primary(exc: Exception) -> bool:
+    if isinstance(exc, TransientSearchError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _PRIMARY_DISABLE_STATUSES
+    return False
+
+
 class FallbackSearchProvider:
     """Wraps a primary SearchProvider and falls back cleanly on HTTP/auth errors."""
 
@@ -281,6 +341,7 @@ class FallbackSearchProvider:
         self.primary = primary
         self.fallback = fallback
         self.provider_name = primary.provider_name
+        self._primary_disabled = False
 
     async def search(
         self,
@@ -289,15 +350,27 @@ class FallbackSearchProvider:
         days: int = 7,
         max_results: int = 20,
     ) -> list[SearchHit]:
+        if self._primary_disabled:
+            return await self.fallback.search(query, days=days, max_results=max_results)
         try:
             return await self.primary.search(query, days=days, max_results=max_results)
         except Exception as exc:
-            logger.warning(
-                "Primary search provider '{}' failed ({}); falling back to '{}'.",
-                self.primary.provider_name,
-                exc,
-                self.fallback.provider_name,
-            )
+            if _should_disable_primary(exc):
+                self._primary_disabled = True
+                logger.warning(
+                    "Primary search provider '{}' failed ({}); "
+                    "switching to '{}' for remaining queries.",
+                    self.primary.provider_name,
+                    exc,
+                    self.fallback.provider_name,
+                )
+            else:
+                logger.warning(
+                    "Primary search provider '{}' failed ({}); falling back to '{}'.",
+                    self.primary.provider_name,
+                    exc,
+                    self.fallback.provider_name,
+                )
             return await self.fallback.search(query, days=days, max_results=max_results)
 
 

@@ -14,7 +14,7 @@ from doot.collectors.ats import (
     detect_ats_from_url,
 )
 from doot.collectors.base import Collector, SearchProvider
-from doot.collectors.dork import DorkDiscoverer
+from doot.collectors.dork import DorkDiscoverer, DorkPack, load_dork_pack
 from doot.collectors.feeds import (
     HimalayasCollector,
     HNHiringCollector,
@@ -47,12 +47,8 @@ class DiscoverySummary:
 
 
 def load_dork_queries(path: Path) -> list[str]:
-    """Load rotating dork queries from YAML if present."""
-    if not path.exists():
-        return []
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    queries = data.get("queries", [])
-    return [str(q).strip() for q in queries if str(q).strip()]
+    """Load flattened dork query strings from YAML if present."""
+    return [spec.query for spec in load_dork_pack(path).queries]
 
 
 async def sync_watchlist_from_yaml(repo: DootRepository, path: Path) -> int:
@@ -166,30 +162,32 @@ async def run_discovery_pipeline(
     use_feeds: bool = False,
     use_dork: bool = False,
     use_jobspy: bool = False,
+    dork_max_priority: int = 2,
     limit_companies: int | None = None,
     search_provider: SearchProvider | None = None,
     jobspy_collector: JobSpyCollector | None = None,
     feed_collectors: list[Collector] | None = None,
 ) -> DiscoverySummary:
-    """Execute hybrid discovery (Dork -> ATS JSON -> Public Feeds -> JobSpy)."""
+    """Execute hybrid discovery (Dork -> Public Feeds -> ATS JSON -> JobSpy)."""
     run_id = await repo.start_run(RunType.DISCOVER)
     summary = DiscoverySummary()
 
     try:
         if use_dork and search_provider is not None:
-            queries = load_dork_queries(settings.dork_queries_path)
-            if not queries and settings.dork_queries_path.with_name(
+            pack: DorkPack = load_dork_pack(settings.dork_queries_path)
+            if not pack.queries and settings.dork_queries_path.with_name(
                 "dork_queries.example.yaml"
             ).exists():
-                queries = load_dork_queries(
+                pack = load_dork_pack(
                     settings.dork_queries_path.with_name("dork_queries.example.yaml")
                 )
-            if queries:
+            if pack.queries:
                 try:
                     dork_res = await DorkDiscoverer(search_provider, repo).discover(
-                        queries,
+                        pack,
                         days=settings.dork_days,
                         max_results=settings.dork_max_results,
+                        max_priority=dork_max_priority,
                     )
                     summary.new_boards_via_dork = len(dork_res.new_companies_added)
                     await _ingest_raw_jobs(repo, dork_res.alert_only_jobs, summary)
