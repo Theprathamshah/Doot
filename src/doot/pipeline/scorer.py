@@ -7,9 +7,10 @@ from loguru import logger
 
 from doot.config import DootSettings
 from doot.db.repository import DootRepository
-from doot.llm import LLMProvider, build_llm_provider
+from doot.llm import DailyQuotaExceededError, LLMProvider, build_llm_provider
 from doot.models.enums import JobStatus, RunStatus, RunType
 from doot.models.profile import UserProfile
+from doot.pipeline.local_scorer import LocalHeuristicLLMProvider
 from doot.pipeline.redactor import build_redacted_profile_summary
 from doot.pipeline.rule_filter import evaluate_rule_filter
 
@@ -24,6 +25,7 @@ class ScoringSummary:
     cache_hits: int = 0
     llm_calls: int = 0
     failed: int = 0
+    quota_exhausted: bool = False
     errors: list[str] = field(default_factory=list)
 
 
@@ -61,13 +63,20 @@ async def run_scoring_pipeline(
     llm_provider: LLMProvider | None = None,
     limit: int = 200,
     stage1_only: bool = False,
+    retry_failed: bool = False,
+    local_only: bool = False,
 ) -> ScoringSummary:
-    """Evaluate DISCOVERED jobs through Stage 1 rules and Stage 2 cached LLM scoring."""
+    """Evaluate DISCOVERED (and optionally FAILED) jobs through Stage 1 & Stage 2."""
     run_id = await repo.start_run(RunType.SCORE)
     summary = ScoringSummary()
 
     try:
-        discovered = await repo.list_jobs(status=JobStatus.DISCOVERED, limit=limit)
+        statuses: tuple[JobStatus, ...] = (
+            (JobStatus.DISCOVERED, JobStatus.FAILED)
+            if retry_failed
+            else (JobStatus.DISCOVERED,)
+        )
+        discovered = await repo.list_jobs_by_statuses(statuses, min_score=0, limit=limit)
         companies_by_id = {c.id: c for c in await repo.list_companies(active_only=False)}
         blocked_names = frozenset(
             c.normalized_name for c in companies_by_id.values() if c.is_blocklisted
@@ -75,7 +84,10 @@ async def run_scoring_pipeline(
 
         active_llm: LLMProvider | None = None
         if not stage1_only and discovered:
-            active_llm = llm_provider or build_llm_provider(settings)
+            if local_only:
+                active_llm = LocalHeuristicLLMProvider()
+            else:
+                active_llm = llm_provider or build_llm_provider(settings)
 
         redacted_profile = build_redacted_profile_summary(profile, resume_markdown)
         model_name = active_llm.model_name if active_llm is not None else settings.gemini_model
@@ -90,7 +102,8 @@ async def run_scoring_pipeline(
                 blocked_companies=blocked_names,
             )
             if not decision.passed:
-                await repo.mark_job_filtered_out(job.id, decision.reason)
+                if job.status != JobStatus.FILTERED_OUT:
+                    await repo.mark_job_filtered_out(job.id, decision.reason)
                 summary.filtered_out += 1
                 continue
 
@@ -113,19 +126,39 @@ async def run_scoring_pipeline(
             )
             try:
                 result = await active_llm.score_job(redacted_profile, untrusted_payload)
+                used_actor = "scorer"
+            except DailyQuotaExceededError as exc:
+                summary.quota_exhausted = True
+                summary.errors.append(str(exc))
+                if settings.fallback_to_local_on_quota and not local_only:
+                    logger.warning(
+                        "All Gemini models hit daily quota; falling back to local scorer "
+                        "for remaining jobs."
+                    )
+                    active_llm = LocalHeuristicLLMProvider()
+                    model_name = active_llm.model_name
+                    cache_key = compute_score_cache_key(
+                        job.jd_hash, profile.profile_version, model_name
+                    )
+                    result = await active_llm.score_job(redacted_profile, untrusted_payload)
+                    used_actor = "local_fallback"
+                else:
+                    logger.warning("Stopping Stage 2 batch early: {}", exc)
+                    break
             except Exception as exc:
                 summary.failed += 1
                 summary.errors.append(f"Job #{job.id} ({job.title}): {exc}")
                 logger.warning("Scoring failed for job #{}: {}", job.id, exc)
-                await repo.transition_job(
-                    job.id,
-                    JobStatus.FAILED,
-                    actor="scorer",
-                    reason=str(exc)[:300],
-                )
+                if job.status != JobStatus.FAILED:
+                    await repo.transition_job(
+                        job.id,
+                        JobStatus.FAILED,
+                        actor="scorer",
+                        reason=str(exc)[:300],
+                    )
                 continue
 
-            await repo.save_job_score(job.id, result, score_cache_key=cache_key, actor="scorer")
+            await repo.save_job_score(job.id, result, score_cache_key=cache_key, actor=used_actor)
             summary.llm_calls += 1
             summary.scored += 1
 

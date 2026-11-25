@@ -92,11 +92,23 @@ def test_rule_filter_blocks_us_only_seniority_blocklist_and_unrelated() -> None:
     assert res_yoe.passed is False
     assert "experience requirement too high" in res_yoe.reason
 
-    # Unrelated role
+    # Unrelated role (including substring traps like "strategy" -> "rag")
     unrelated = _sample_job_record(
         title="Salesforce Administrator", jd_text="Manage CRM workflows."
     )
     assert evaluate_rule_filter(unrelated, profile).passed is False
+
+    nontech_substring_trap = _sample_job_record(
+        title="Senior Associate - Corporate Strategy",
+        jd_text="Own corporate strategy and enterprise capabilities roadmap.",
+    )
+    assert evaluate_rule_filter(nontech_substring_trap, profile).passed is False
+
+    aeo_manager = _sample_job_record(
+        title="Associate Manager, AEO",
+        jd_text="Drive SEO and AEO automation using Python scripts.",
+    )
+    assert evaluate_rule_filter(aeo_manager, profile).passed is False
 
     # Valid India / Remote match passes
     good = _sample_job_record(

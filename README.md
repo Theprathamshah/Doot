@@ -22,10 +22,12 @@ Local-first **Job Search Triage, RAG-Grounded Resume Tailoring, MCP Server, and 
    uv run doot init
    uv run doot sync-watchlist
    uv run doot add-company https://boards.greenhouse.io/postman --name Postman
-   uv run doot discover --ats
-   uv run doot score                 # Stage 1 + cached Gemini scoring (PII redacted)
+   uv run doot discover --ats --feeds --dork
+   uv run doot score                 # Stage 1 + Gemini multi-model fallback (or --local)
    uv run doot digest --notify       # Ranked table + optional macOS/webhook/email alert
    uv run doot tailor 1              # RAG-grounded summary, cover note & outreach DM
+   uv run doot find-contacts --job-id 1  # Find public HR / EM / Founder emails
+   uv run doot outreach 1            # Draft grounded cold email (add --send to email)
    uv run doot apply 1               # Headed Chromium pre-fill (dry-run by default)
    uv run doot apply 1 --apply       # Live submit (requires DOOT_DRY_RUN=false + Y confirm)
    uv run doot review                # Interactive triage ([t]ailor / [s]kip / [a]pplied / [o]pen)

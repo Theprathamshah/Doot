@@ -24,6 +24,12 @@ from doot.mcp_server import create_mcp_server
 from doot.models.enums import ATSProvider, JobStatus, RunStatus, RunType
 from doot.models.job import TailoredAssets
 from doot.notify import dispatch_one_way_alert, render_digest_table, render_job_panel
+from doot.outreach import (
+    ColdEmailDraft,
+    draft_cold_email,
+    find_contacts_for_company,
+    send_outreach_email,
+)
 from doot.pipeline import (
     add_company_from_target,
     load_resume_markdown,
@@ -292,11 +298,16 @@ def add_company(
 @app.command()
 def discover(
     ats: bool = typer.Option(True, "--ats/--no-ats", help="Poll active ATS JSON boards."),
+    feeds: bool = typer.Option(
+        True,
+        "--feeds/--no-feeds",
+        help="Poll free public remote/startup JSON feeds (Himalayas, Remotive, Jobicy, HN).",
+    ),
     dork: bool = typer.Option(False, "--dork/--no-dork", help="Run search-dork board discovery."),
     jobspy: bool = typer.Option(False, "--jobspy/--no-jobspy", help="Run logged-out JobSpy."),
     limit_companies: int | None = typer.Option(None, "--limit", help="Max ATS boards to poll."),
 ) -> None:
-    """Run hybrid job discovery (Dork-to-Crawl + ATS JSON APIs + optional JobSpy)."""
+    """Run hybrid job discovery (Dork-to-Crawl + ATS JSON + Public Feeds + optional JobSpy)."""
     settings = _load_settings()
     try:
         assert_not_stopped(settings)
@@ -313,17 +324,13 @@ def discover(
             await initialize_schema(conn)
             repo = DootRepository(conn)
             provider = build_search_provider(settings, client, rate_limiter) if dork else None
-            if dork and provider is None:
-                console.print(
-                    "[yellow]Warning:[/yellow] --dork enabled but no API key configured "
-                    f"for {settings.search_provider}; skipping dorks."
-                )
             return await run_discovery_pipeline(
                 settings,
                 repo,
                 client=client,
                 rate_limiter=rate_limiter,
                 use_ats=ats,
+                use_feeds=feeds,
                 use_dork=dork and provider is not None,
                 use_jobspy=jobspy or settings.jobspy_enabled,
                 limit_companies=limit_companies,
@@ -354,8 +361,19 @@ def score(
         bool,
         typer.Option("--stage1-only", help="Run only Stage 1 rule filter (zero LLM calls)."),
     ] = False,
+    retry_failed: Annotated[
+        bool,
+        typer.Option("--retry-failed", help="Also re-evaluate previously FAILED jobs."),
+    ] = False,
+    local: Annotated[
+        bool,
+        typer.Option(
+            "--local",
+            help="Use instant zero-cost local heuristic scorer instead of Gemini API.",
+        ),
+    ] = False,
 ) -> None:
-    """Run Stage 1 deterministic filtering and Stage 2 cached Gemini scoring."""
+    """Run Stage 1 deterministic filtering and Stage 2 scoring (Gemini or --local)."""
     settings = _load_settings()
     try:
         assert_not_stopped(settings)
@@ -377,6 +395,8 @@ def score(
                 resume_markdown=resume_md,
                 limit=limit,
                 stage1_only=stage1_only,
+                retry_failed=retry_failed,
+                local_only=local,
             )
 
     try:
@@ -392,9 +412,14 @@ def score(
     table.add_row("Filtered Out (Stage 1)", str(summary.filtered_out))
     table.add_row("Scored (Stage 2)", str(summary.scored))
     table.add_row("Cache Hits", str(summary.cache_hits))
-    table.add_row("Gemini API Calls", str(summary.llm_calls))
+    table.add_row("Scorer Calls", str(summary.llm_calls))
     table.add_row("Failed", str(summary.failed))
     console.print(table)
+    if summary.quota_exhausted:
+        console.print(
+            "[yellow]Gemini daily free-tier quota exhausted.[/yellow] "
+            "Run `uv run doot score --local --retry-failed` for instant free scoring."
+        )
 
 
 @app.command()
@@ -682,15 +707,240 @@ def apply_job(
     console.print(f"[{color}]{result.status.value}:[/{color}] {result.message}")
 
 
+@app.command("find-contacts")
+def find_contacts(
+    job_id: Annotated[
+        int | None,
+        typer.Option("--job-id", help="Lookup HR/manager/founder contacts for a saved job."),
+    ] = None,
+    company: Annotated[
+        str | None,
+        typer.Option("--company", help="Target company name (if not using --job-id)."),
+    ] = None,
+    domain: Annotated[
+        str | None,
+        typer.Option("--domain", help="Explicit company domain (e.g. razorpay.com)."),
+    ] = None,
+) -> None:
+    """Find public HR, Engineering Manager, or Founder emails for a job or company."""
+    settings = _load_settings()
+    if job_id is None and not company:
+        console.print("[red]Error:[/red] Provide either --job-id or --company.")
+        raise typer.Exit(code=1)
+
+    async def _find() -> tuple[Any, list[dict[str, Any]]]:
+        rate_limiter = DomainRateLimiter(min_interval_seconds=1.0)
+        async with (
+            open_connection(settings.db_path) as conn,
+            httpx.AsyncClient() as client,
+        ):
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            search_provider = build_search_provider(settings, client, rate_limiter)
+
+            target_company = company or ""
+            careers_url: str | None = None
+            jd_text = ""
+            company_id: int | None = None
+
+            if job_id is not None:
+                job = await repo.get_job(job_id)
+                if job is None:
+                    raise LookupError(f"Job #{job_id} not found")
+                target_company = target_company or job.company_name
+                company_id = job.company_id
+                jd_text = job.jd_text
+                if job.company_id is not None:
+                    co = await repo.get_company_by_id(job.company_id)
+                    if co is not None:
+                        careers_url = co.careers_url
+                if not careers_url:
+                    careers_url = job.apply_url
+
+            res = await find_contacts_for_company(
+                settings,
+                repo,
+                company_name=target_company,
+                domain=domain,
+                careers_url=careers_url,
+                jd_text=jd_text,
+                company_id=company_id,
+                job_id=job_id,
+                search_provider=search_provider,
+                client=client,
+            )
+            saved = await repo.list_contacts(job_id=job_id, limit=30)
+            return res, [c for c in saved if c["id"] in res.contact_ids]
+
+    try:
+        res, rows = _run_async(_find())
+    except LookupError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    mx_label = "[green]valid MX[/green]" if res.mx_valid else "[yellow]unverified MX[/yellow]"
+    console.print(f"Company: [bold]{res.company_name}[/bold] | Domain: {res.domain} ({mx_label})")
+
+    table = Table(title=f"Discovered Contacts ({len(rows)})")
+    table.add_column("ID", justify="right", style="cyan")
+    table.add_column("Name")
+    table.add_column("Role")
+    table.add_column("Email")
+    table.add_column("Confidence")
+    table.add_column("Source")
+    for row in rows:
+        table.add_row(
+            f"#{row['id']}",
+            str(row["person_name"] or "-"),
+            str(row["role_title"] or "-"),
+            str(row["email"]),
+            str(row["confidence"]),
+            str(row["source"]),
+        )
+    console.print(table)
+
+
+@app.command()
+def contacts(
+    job_id: Annotated[int | None, typer.Option("--job-id")] = None,
+    unemailed: Annotated[bool, typer.Option("--unemailed")] = False,
+    limit: Annotated[int, typer.Option("--limit")] = 50,
+) -> None:
+    """List saved HR/manager/founder contacts."""
+    settings = _load_settings()
+
+    async def _list() -> list[dict[str, Any]]:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            return await repo.list_contacts(
+                job_id=job_id, unemailed_only=unemailed, limit=limit
+            )
+
+    rows = _run_async(_list())
+    if not rows:
+        console.print("[yellow]No contacts found.[/yellow]")
+        return
+
+    table = Table(title=f"Saved Contacts ({len(rows)})")
+    table.add_column("ID", justify="right", style="cyan")
+    table.add_column("Company")
+    table.add_column("Name")
+    table.add_column("Role")
+    table.add_column("Email")
+    table.add_column("Confidence")
+    table.add_column("Emailed")
+    for row in rows:
+        table.add_row(
+            f"#{row['id']}",
+            str(row["company_name"]),
+            str(row["person_name"] or "-"),
+            str(row["role_title"] or "-"),
+            str(row["email"]),
+            str(row["confidence"]),
+            str(row["emailed_at"] or "no"),
+        )
+    console.print(table)
+
+
+@app.command()
+def outreach(
+    contact_id: Annotated[int, typer.Argument(help="Contact ID from `doot contacts`.")],
+    send: Annotated[
+        bool,
+        typer.Option("--send", help="Actually send email via SMTP (default: dry-run draft)."),
+    ] = False,
+    attach_resume: Annotated[
+        bool,
+        typer.Option("--attach/--no-attach", help="Attach data/resume.pdf when sending."),
+    ] = True,
+) -> None:
+    """Draft or send a grounded cold email to an HR/manager/founder contact."""
+    settings = _load_settings()
+    try:
+        assert_not_stopped(settings)
+        profile = load_user_profile(settings)
+    except (SafetyGuardError, FileNotFoundError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    resume_md = load_resume_markdown(profile, settings)
+    stories_md = load_stories_markdown(profile, settings)
+    llm = build_llm_provider(settings) if settings.gemini_api_key.get_secret_value() else None
+
+    async def _confirm(draft: ColdEmailDraft, recipient: str) -> bool:
+        return typer.confirm(f"Send cold email to {recipient}?", default=False)
+
+    async def _run() -> tuple[ColdEmailDraft, bool, str]:
+        async with open_connection(settings.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            contact = await repo.get_contact(contact_id)
+            if contact is None:
+                raise LookupError(f"Contact #{contact_id} not found")
+            linked_job = (
+                await repo.get_job(int(contact["job_id"]))
+                if contact.get("job_id") is not None
+                else None
+            )
+            role_title = linked_job.title if linked_job else "Backend / Full Stack Engineer"
+            draft = await draft_cold_email(
+                profile=profile,
+                company_name=str(contact["company_name"]),
+                role_title=role_title,
+                person_name=str(contact["person_name"] or ""),
+                recipient_role=str(contact["role_title"] or ""),
+                job=linked_job,
+                resume_markdown=resume_md,
+                stories_markdown=stories_md,
+                llm_provider=llm,
+            )
+            console.print(
+                Panel(
+                    f"[bold]To:[/bold] {contact['email']}\n"
+                    f"[bold]Subject:[/bold] {draft.subject}\n\n{draft.body}",
+                    title=f"Outreach Draft (Contact #{contact_id})",
+                    border_style="cyan",
+                )
+            )
+            attachment = profile.resume_pdf_path if attach_resume else None
+            sent = await send_outreach_email(
+                settings,
+                repo,
+                contact_id=contact_id,
+                draft=draft,
+                job_id=linked_job.id if linked_job else None,
+                send_flag=send,
+                attachment_path=attachment,
+                confirm_fn=_confirm,
+            )
+            return draft, sent, str(contact["email"])
+
+    try:
+        _, sent, recipient = _run_async(_run())
+    except (SafetyGuardError, LookupError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if sent:
+        console.print(f"[green]Sent cold email to {recipient}.[/green]")
+    else:
+        console.print(
+            "[yellow]Draft saved (dry-run). Pass `--send` with DOOT_DRY_RUN=false "
+            "and SMTP configured to send.[/yellow]"
+        )
+
+
 @app.command("pipeline-run")
 def pipeline_run(
     ats: Annotated[bool, typer.Option("--ats/--no-ats")] = True,
+    feeds: Annotated[bool, typer.Option("--feeds/--no-feeds")] = True,
     dork: Annotated[bool, typer.Option("--dork/--no-dork")] = False,
     jobspy: Annotated[bool, typer.Option("--jobspy/--no-jobspy")] = False,
     notify: Annotated[bool, typer.Option("--notify/--no-notify")] = True,
 ) -> None:
     """Run discover -> score -> digest end-to-end (for macOS LaunchAgent schedules)."""
-    discover(ats=ats, dork=dork, jobspy=jobspy, limit_companies=None)
+    discover(ats=ats, feeds=feeds, dork=dork, jobspy=jobspy, limit_companies=None)
     settings = _load_settings()
     if settings.profile_path.exists():
         score(limit=200, stage1_only=False)

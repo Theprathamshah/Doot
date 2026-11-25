@@ -10,8 +10,10 @@ from typer.testing import CliRunner
 from doot.cli import app
 from doot.config import DootSettings
 from doot.db import DootRepository
+from doot.llm import DailyQuotaExceededError
 from doot.llm.gemini import GeminiLLMProvider
 from doot.models import JobPosting, JobStatus, ProfileLinks, ScoreResult, UserProfile
+from doot.pipeline.local_scorer import LocalHeuristicLLMProvider
 from doot.pipeline.scorer import run_scoring_pipeline
 from tests.conftest import make_sample_job
 
@@ -177,3 +179,185 @@ def test_cli_score_stage1_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     res = runner.invoke(app, ["score", "--stage1-only"])
     assert res.exit_code == 0
     assert "Scoring Summary" in res.output
+
+
+async def test_gemini_client_defaults_to_v1beta_and_retry_failed_scores_job(
+    tmp_settings: DootSettings,
+    repo: DootRepository,
+) -> None:
+    provider = GeminiLLMProvider(api_key="dummy-key", model_name="gemini-2.5-flash")
+    assert provider._client._api_client._http_options.api_version == "v1beta"
+
+    job = make_sample_job(external_job_id="retry-1")
+    jid, _ = await repo.upsert_job(job)
+    await repo.transition_job(jid, JobStatus.FAILED, actor="scorer", reason="400 error")
+
+    summary = await run_scoring_pipeline(
+        tmp_settings,
+        repo,
+        profile=_profile(),
+        llm_provider=_FakeLLMProvider(),
+        retry_failed=True,
+    )
+    assert summary.scored == 1
+    assert summary.failed == 0
+    stored = await repo.get_job(jid)
+    assert stored is not None and stored.status == JobStatus.SCORED
+
+
+async def test_score_result_clamps_long_reasoning_and_retry_failure_does_not_crash(
+    tmp_settings: DootSettings,
+    repo: DootRepository,
+) -> None:
+    clamped = ScoreResult(
+        score=4,
+        should_apply=True,
+        reasoning="A" * 650,
+    )
+    assert len(clamped.reasoning) == 500
+    assert clamped.reasoning.endswith("...")
+
+    job = make_sample_job(external_job_id="retry-fail-twice")
+    job.jd_text = "AWS Java role TRIGGER_FAIL"
+    jid, _ = await repo.upsert_job(job)
+    await repo.transition_job(jid, JobStatus.FAILED, actor="scorer", reason="first failure")
+
+    summary = await run_scoring_pipeline(
+        tmp_settings,
+        repo,
+        profile=_profile(),
+        llm_provider=_FakeLLMProvider(fail_on_substring="TRIGGER_FAIL"),
+        retry_failed=True,
+    )
+    assert summary.failed == 1
+    stored = await repo.get_job(jid)
+    assert stored is not None and stored.status == JobStatus.FAILED
+
+
+async def test_daily_quota_stops_batch_early_and_local_scorer_works(
+    tmp_settings: DootSettings,
+    repo: DootRepository,
+) -> None:
+    j1 = make_sample_job(external_job_id="q-1")
+    j2 = make_sample_job(external_job_id="q-2")
+    id1, _ = await repo.upsert_job(j1)
+    id2, _ = await repo.upsert_job(j2)
+
+    class _QuotaExhaustedLLM:
+        provider_name = "gemini"
+        model_name = "gemini-2.5-flash"
+
+        async def score_job(self, redacted_profile: str, untrusted_jd: str) -> ScoreResult:
+            raise DailyQuotaExceededError("Daily quota reached")
+
+        async def draft_tailoring(self, evidence_chunks: list[str], job: JobPosting):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+        async def draft_free_text_answer(
+            self, question: str, evidence_chunks: list[str], job: JobPosting
+        ) -> str:
+            raise NotImplementedError
+
+    no_fb_settings = tmp_settings.model_copy(update={"fallback_to_local_on_quota": False})
+    summary = await run_scoring_pipeline(
+        no_fb_settings,
+        repo,
+        profile=_profile(),
+        llm_provider=_QuotaExhaustedLLM(),
+    )
+    assert summary.quota_exhausted is True
+    assert summary.failed == 0
+    # Both jobs stay DISCOVERED so `--local` can score them immediately
+    assert (await repo.get_job(id1)).status == JobStatus.DISCOVERED  # type: ignore[union-attr]
+    assert (await repo.get_job(id2)).status == JobStatus.DISCOVERED  # type: ignore[union-attr]
+
+    local_summary = await run_scoring_pipeline(
+        tmp_settings,
+        repo,
+        profile=_profile(),
+        local_only=True,
+    )
+    assert local_summary.scored == 2
+    assert (await repo.get_job(id1)).llm_score >= 4  # type: ignore[operator, union-attr]
+
+    rust_score = await LocalHeuristicLLMProvider().score_job(
+        "Java Spring Boot AWS",
+        "Role Title: Rust Engineering Lead - Linux\n\nBuild embedded Rust kernel drivers.",
+    )
+    assert rust_score.score <= 2
+
+
+async def test_gemini_rotates_fallback_models_and_pipeline_falls_back_to_local(
+    tmp_settings: DootSettings,
+    repo: DootRepository,
+) -> None:
+    from google.genai import errors
+
+    called_models: list[str] = []
+
+    class _RotatingFakeModels:
+        async def generate_content(self, **kwargs: object) -> object:
+            model = str(kwargs["model"])
+            called_models.append(model)
+            if model == "gemini-2.5-flash":
+                raise errors.APIError(
+                    429,
+                    {"error": {"message": "GenerateRequestsPerDay exceeded"}},
+                    None,
+                )
+            return SimpleNamespace(
+                parsed=None,
+                text=json.dumps(
+                    {
+                        "score": 5,
+                        "should_apply": True,
+                        "reasoning": "Fallback model succeeded.",
+                        "missing_skills": [],
+                        "india_remote_eligible": True,
+                        "detected_seniority": "mid",
+                    }
+                ),
+            )
+
+    fake_client = SimpleNamespace(aio=SimpleNamespace(models=_RotatingFakeModels()))
+    provider = GeminiLLMProvider(
+        api_key="dummy-key",
+        model_name="gemini-2.5-flash",
+        fallback_models=["gemini-2.5-flash-lite"],
+        client=fake_client,
+    )
+    res = await provider.score_job("2.5 yrs AWS", "Backend AWS Java role in Bengaluru")
+    assert res.score == 5
+    assert called_models == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    assert provider.model_name == "gemini-2.5-flash-lite"
+
+    # Now verify full pipeline auto-falls back to local scorer if all models exhaust quota
+    jid, _ = await repo.upsert_job(make_sample_job(external_job_id="auto-fb-1"))
+
+    class _AlwaysExhaustedLLM:
+        provider_name = "gemini"
+        model_name = "gemini-2.5-flash"
+
+        async def score_job(self, redacted_profile: str, untrusted_jd: str) -> ScoreResult:
+            raise DailyQuotaExceededError("All models exhausted")
+
+        async def draft_tailoring(self, evidence_chunks: list[str], job: JobPosting):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+        async def draft_free_text_answer(
+            self, question: str, evidence_chunks: list[str], job: JobPosting
+        ) -> str:
+            raise NotImplementedError
+
+    fb_settings = tmp_settings.model_copy(update={"fallback_to_local_on_quota": True})
+    fb_summary = await run_scoring_pipeline(
+        fb_settings,
+        repo,
+        profile=_profile(),
+        llm_provider=_AlwaysExhaustedLLM(),
+    )
+    assert fb_summary.quota_exhausted is True
+    assert fb_summary.scored == 1
+    assert fb_summary.failed == 0
+    stored = await repo.get_job(jid)
+    assert stored is not None and stored.status == JobStatus.SCORED

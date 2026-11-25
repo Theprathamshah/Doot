@@ -789,3 +789,133 @@ class DootRepository:
         for row in rows:
             counts[str(row["status"])] = int(row["cnt"])
         return counts
+
+    async def upsert_contact(
+        self,
+        *,
+        company_name: str,
+        email: str,
+        person_name: str = "",
+        role_title: str = "",
+        confidence: str = "pattern",
+        source: str = "dork",
+        linkedin_url: str | None = None,
+        company_id: int | None = None,
+        job_id: int | None = None,
+    ) -> int:
+        """Store or update a discovered HR/manager/founder contact."""
+        norm_email = email.strip().lower()
+        await self.conn.execute(
+            """
+            INSERT INTO contacts (
+                company_id, job_id, company_name, person_name, role_title,
+                email, confidence, source, linkedin_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(email, company_name) DO UPDATE SET
+                person_name = CASE
+                    WHEN excluded.person_name != '' THEN excluded.person_name
+                    ELSE contacts.person_name
+                END,
+                role_title = CASE
+                    WHEN excluded.role_title != '' THEN excluded.role_title
+                    ELSE contacts.role_title
+                END,
+                linkedin_url = COALESCE(excluded.linkedin_url, contacts.linkedin_url),
+                job_id = COALESCE(excluded.job_id, contacts.job_id)
+            """,
+            (
+                company_id,
+                job_id,
+                company_name.strip(),
+                person_name.strip(),
+                role_title.strip(),
+                norm_email,
+                confidence,
+                source,
+                linkedin_url,
+            ),
+        )
+        cursor = await self.conn.execute(
+            "SELECT id FROM contacts WHERE email = ? AND company_name = ?",
+            (norm_email, company_name.strip()),
+        )
+        row = await cursor.fetchone()
+        await self.conn.commit()
+        assert row is not None
+        return int(row["id"])
+
+    async def list_contacts(
+        self,
+        *,
+        job_id: int | None = None,
+        unemailed_only: bool = False,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List discovered contacts optionally filtered by job or unemailed status."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if job_id is not None:
+            clauses.append("job_id = ?")
+            params.append(job_id)
+        if unemailed_only:
+            clauses.append("emailed_at IS NULL")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        cursor = await self.conn.execute(
+            f"SELECT * FROM contacts {where} ORDER BY id DESC LIMIT ?",
+            tuple(params),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+    async def get_contact(self, contact_id: int) -> dict[str, Any] | None:
+        """Fetch a single contact by ID."""
+        cursor = await self.conn.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    async def count_outreach_sent_today(self) -> int:
+        """Count cold outreach emails sent today (UTC date)."""
+        cursor = await self.conn.execute(
+            """
+            SELECT COUNT(*) AS cnt FROM outreach_logs
+            WHERE status = 'SENT' AND sent_at IS NOT NULL AND date(sent_at) = date('now')
+            """
+        )
+        row = await cursor.fetchone()
+        return int(row["cnt"]) if row is not None else 0
+
+    async def record_outreach_email(
+        self,
+        *,
+        contact_id: int,
+        job_id: int | None,
+        subject: str,
+        body: str,
+        sent: bool,
+        error_message: str | None = None,
+    ) -> None:
+        """Log a drafted or sent cold email and update contact.emailed_at when sent."""
+        status = "SENT" if sent else ("FAILED" if error_message else "DRAFTED")
+        await self.conn.execute(
+            """
+            INSERT INTO outreach_logs (
+                contact_id, job_id, subject, body, status, sent_at, error_message
+            )
+            VALUES (
+                ?, ?, ?, ?, ?,
+                CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,
+                ?
+            )
+            """,
+            (contact_id, job_id, subject, body, status, int(sent), error_message),
+        )
+        if sent:
+            await self.conn.execute(
+                """
+                UPDATE contacts
+                SET emailed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ?
+                """,
+                (contact_id,),
+            )
+        await self.conn.commit()

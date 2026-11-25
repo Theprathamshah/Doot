@@ -47,19 +47,26 @@ _INDIA_HINTS = (
     "kolkata",
     "apac",
     "anywhere",
+    "worldwide",
     "global",
+    "all regions",
 )
 
 _US_ONLY_HINTS = (
     "us only",
     "u.s. only",
+    "usa only",
     "united states only",
+    "north america only",
+    "americas only",
+    "latam only",
     "remote - us",
     "remote (us)",
     "must be authorized to work in the united states",
     "must reside in the us",
     "uk only",
     "eu only",
+    "europe only",
     "emea only",
     "canada only",
 )
@@ -112,9 +119,21 @@ def compute_dedupe_cluster_id(
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
+_BROAD_REMOTE_MARKERS = (
+    "india",
+    "apac",
+    "anywhere",
+    "worldwide",
+    "global",
+    "all regions",
+    "earth",
+    "work from anywhere",
+)
+
+
 def infer_remote_and_india(location_raw: str) -> tuple[bool, bool]:
     """Infer `(is_remote, india_eligible)` flags from location metadata."""
-    loc_lower = location_raw.lower()
+    loc_lower = location_raw.strip().lower()
     is_remote = "remote" in loc_lower or "work from home" in loc_lower or "wfh" in loc_lower
 
     if any(hint in loc_lower for hint in _US_ONLY_HINTS):
@@ -122,9 +141,13 @@ def infer_remote_and_india(location_raw: str) -> tuple[bool, bool]:
     if any(hint in loc_lower for hint in _INDIA_HINTS):
         return is_remote, True
     if is_remote:
-        # Generic "Remote" passes Stage 0 normalization; Stage 1 checks JD body traps.
-        return True, True
-    if not loc_lower.strip():
+        # Plain "Remote" / "Remote - Full Time" passes; "Remote (Canada)" / "Remote (China)" fails
+        stripped = re.sub(r"\b(?:remote|work from home|wfh|hybrid|full[- ]time)\b", "", loc_lower)
+        stripped = re.sub(r"[^a-z]+", "", stripped)
+        if not stripped:
+            return True, True
+        return True, any(marker in loc_lower for marker in _BROAD_REMOTE_MARKERS)
+    if not loc_lower:
         return False, True
     # Explicit non-India on-site city (e.g. "San Francisco, CA")
     return False, False

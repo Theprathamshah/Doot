@@ -13,8 +13,16 @@ from doot.collectors.ats import (
     detect_ats_from_html,
     detect_ats_from_url,
 )
-from doot.collectors.base import SearchProvider
+from doot.collectors.base import Collector, SearchProvider
 from doot.collectors.dork import DorkDiscoverer
+from doot.collectors.feeds import (
+    HimalayasCollector,
+    HNHiringCollector,
+    JobicyCollector,
+    RedditHiringCollector,
+    RemotiveCollector,
+    WeWorkRemotelyCollector,
+)
 from doot.collectors.jobspy_collector import JobSpyCollector
 from doot.collectors.rate_limiter import DomainRateLimiter
 from doot.config import DootSettings
@@ -155,13 +163,15 @@ async def run_discovery_pipeline(
     client: httpx.AsyncClient,
     rate_limiter: DomainRateLimiter,
     use_ats: bool = True,
+    use_feeds: bool = False,
     use_dork: bool = False,
     use_jobspy: bool = False,
     limit_companies: int | None = None,
     search_provider: SearchProvider | None = None,
     jobspy_collector: JobSpyCollector | None = None,
+    feed_collectors: list[Collector] | None = None,
 ) -> DiscoverySummary:
-    """Execute hybrid discovery (Dork -> ATS JSON -> JobSpy) with audit run tracking."""
+    """Execute hybrid discovery (Dork -> ATS JSON -> Public Feeds -> JobSpy)."""
     run_id = await repo.start_run(RunType.DISCOVER)
     summary = DiscoverySummary()
 
@@ -175,13 +185,53 @@ async def run_discovery_pipeline(
                     settings.dork_queries_path.with_name("dork_queries.example.yaml")
                 )
             if queries:
-                dork_res = await DorkDiscoverer(search_provider, repo).discover(
-                    queries,
-                    days=settings.dork_days,
-                    max_results=settings.dork_max_results,
-                )
-                summary.new_boards_via_dork = len(dork_res.new_companies_added)
-                await _ingest_raw_jobs(repo, dork_res.alert_only_jobs, summary)
+                try:
+                    dork_res = await DorkDiscoverer(search_provider, repo).discover(
+                        queries,
+                        days=settings.dork_days,
+                        max_results=settings.dork_max_results,
+                    )
+                    summary.new_boards_via_dork = len(dork_res.new_companies_added)
+                    await _ingest_raw_jobs(repo, dork_res.alert_only_jobs, summary)
+                except Exception as exc:
+                    summary.errors.append(f"dork ({search_provider.provider_name}): {exc}")
+                    logger.warning("Dork discovery failed: {}", exc)
+
+        if use_feeds:
+            active_feeds: list[Collector] = (
+                feed_collectors
+                if feed_collectors is not None
+                else [
+                    HimalayasCollector(client, rate_limiter, limit=100),
+                    RemotiveCollector(client, rate_limiter, limit=100),
+                    JobicyCollector(client, rate_limiter, count=50),
+                    HNHiringCollector(client, rate_limiter, limit=80),
+                    WeWorkRemotelyCollector(client, rate_limiter, limit=80),
+                    RedditHiringCollector(client, rate_limiter, limit_per_sub=20),
+                ]
+            )
+            for feed in active_feeds:
+                try:
+                    feed_jobs = await feed.fetch()
+                    # Register any ATS boards discovered in HN/feed links before ATS crawl
+                    for rj in feed_jobs:
+                        if rj.ats_provider is not None and rj.board_token:
+                            existing_co = await repo.get_company_by_ats(
+                                rj.ats_provider, rj.board_token
+                            )
+                            if existing_co is None:
+                                await repo.upsert_company(
+                                    name=rj.company_name[:80],
+                                    normalized_name=normalize_text(rj.company_name[:80]),
+                                    ats_provider=rj.ats_provider,
+                                    board_token=rj.board_token,
+                                    careers_url=rj.apply_url,
+                                    source=CompanySource.SEED,
+                                )
+                    await _ingest_raw_jobs(repo, feed_jobs, summary)
+                except Exception as exc:
+                    summary.errors.append(f"feed ({feed.source_name}): {exc}")
+                    logger.warning("Public feed {} failed: {}", feed.source_name, exc)
 
         if use_ats:
             companies = await repo.list_companies(active_only=True)

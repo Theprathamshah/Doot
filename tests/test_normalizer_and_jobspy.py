@@ -27,7 +27,10 @@ def test_infer_remote_and_india_eligibility() -> None:
     assert infer_remote_and_india("Bengaluru, India") == (False, True)
     assert infer_remote_and_india("Remote - India") == (True, True)
     assert infer_remote_and_india("Remote") == (True, True)
+    assert infer_remote_and_india("Remote (Worldwide)") == (True, True)
     assert infer_remote_and_india("Remote (US Only)") == (True, False)
+    assert infer_remote_and_india("Remote (United States)") == (True, False)
+    assert infer_remote_and_india("Remote (Canada)") == (True, False)
     assert infer_remote_and_india("San Francisco, CA") == (False, False)
 
 

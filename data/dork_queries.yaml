@@ -1,0 +1,11 @@
+# Rotating search dork queries focused on niche Wellfound, LinkedIn Remote, LinkedIn hiring posts, X/Twitter, and Indian startups.
+
+queries:
+  - 'site:wellfound.com/jobs Remote India Backend OR "Full Stack" AWS'
+  - 'site:wellfound.com/jobs Bengaluru OR Hyderabad Java OR Node OR Python'
+  - 'site:linkedin.com/jobs/view Remote India "Backend" OR "Full Stack" AWS'
+  - 'site:linkedin.com/posts hiring "Backend" OR "Full Stack" India OR Remote'
+  - 'site:x.com "hiring" ("Backend" OR "Full Stack" OR "AI Engineer") ("India" OR "Remote")'
+  - 'site:jobs.ashbyhq.com India OR Remote Backend OR Fullstack OR AI'
+  - 'site:job-boards.greenhouse.io India OR Bengaluru "Software Engineer" OR Backend'
+  - 'site:jobs.lever.co India OR Bengaluru "Software Engineer" OR Backend'

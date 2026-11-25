@@ -24,6 +24,15 @@ class DootSettings(BaseSettings):
     llm_provider: str = "gemini"
     gemini_api_key: SecretStr = SecretStr("")
     gemini_model: str = "gemini-2.5-flash"
+    gemini_fallback_models: list[str] = Field(
+        default_factory=lambda: [
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+        ]
+    )
+    llm_min_interval_seconds: float = Field(default=6.0, ge=0.0)
+    fallback_to_local_on_quota: bool = True
 
     # Discovery configuration (Phase 2)
     search_provider: str = "serper"
@@ -61,8 +70,10 @@ class DootSettings(BaseSettings):
     profile_version: str = "v1"
     daily_apply_cap: int = Field(default=15, ge=1, le=100)
     per_company_cap: int = Field(default=2, ge=1, le=10)
+    daily_outreach_cap: int = Field(default=10, ge=1, le=50)
     min_digest_score: int = Field(default=4, ge=1, le=5)
     dry_run: bool = True
+    hunter_api_key: SecretStr = SecretStr("")
 
     @property
     def stop_file_path(self) -> Path:
@@ -92,5 +103,6 @@ class DootSettings(BaseSettings):
             self.brave_api_key.get_secret_value(),
             self.tavily_api_key.get_secret_value(),
             self.notify_email_password.get_secret_value(),
+            self.hunter_api_key.get_secret_value(),
         ]
         return [s for s in candidates if s]

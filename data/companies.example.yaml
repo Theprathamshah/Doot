@@ -1,4 +1,4 @@
-# Seed watchlist of companies using public Greenhouse / Lever / Ashby boards.
+# Seed watchlist of verified companies using public Greenhouse / Lever / Ashby boards.
 # Copy to data/companies.yaml and customize.
 
 companies:
@@ -8,8 +8,26 @@ companies:
     careers_url: https://razorpay.com/jobs/
     is_blocklisted: false
 
-  - name: Postman
-    ats_provider: greenhouse
-    board_token: postman
-    careers_url: https://www.postman.com/company/careers/
+  - name: CRED
+    ats_provider: lever
+    board_token: cred
+    careers_url: https://careers.cred.club/
+    is_blocklisted: false
+
+  - name: Meesho
+    ats_provider: lever
+    board_token: meesho
+    careers_url: https://www.meesho.io/jobs
+    is_blocklisted: false
+
+  - name: Supabase
+    ats_provider: ashby
+    board_token: supabase
+    careers_url: https://supabase.com/careers
+    is_blocklisted: false
+
+  - name: PostHog
+    ats_provider: ashby
+    board_token: posthog
+    careers_url: https://posthog.com/careers
     is_blocklisted: false

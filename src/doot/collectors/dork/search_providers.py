@@ -1,8 +1,11 @@
 """SearchProvider implementations for Serper, Brave Search, and Tavily."""
 
+import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import httpx
+from loguru import logger
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from doot.collectors.base import SearchHit, SearchProvider
@@ -218,23 +221,113 @@ class TavilySearchProvider:
         return hits
 
 
+class DuckDuckGoSearchProvider:
+    """Zero-key metasearch provider powered by `ddgs`."""
+
+    provider_name = "ddg"
+
+    def __init__(
+        self,
+        rate_limiter: DomainRateLimiter,
+        *,
+        search_fn: Callable[..., list[dict[str, Any]]] | None = None,
+    ) -> None:
+        self.rate_limiter = rate_limiter
+        self._search_fn = search_fn
+
+    def _run_sync(self, query: str, timelimit: str, max_results: int) -> list[dict[str, Any]]:
+        if self._search_fn is not None:
+            return self._search_fn(query, timelimit=timelimit, max_results=max_results)
+        from ddgs import DDGS
+        from ddgs.exceptions import DDGSException
+
+        try:
+            with DDGS(timeout=10) as client:
+                return client.text(query, timelimit=timelimit, max_results=max_results)
+        except DDGSException as exc:
+            logger.debug("DDGS returned no results for '{}': {}", query[:60], exc)
+            return []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        days: int = 7,
+        max_results: int = 20,
+    ) -> list[SearchHit]:
+        await self.rate_limiter.acquire("duckduckgo.com")
+        timelimit = "d" if days <= 1 else ("w" if days <= 7 else "m")
+        rows = await asyncio.to_thread(self._run_sync, query, timelimit, max_results)
+        hits: list[SearchHit] = []
+        for item in rows[:max_results]:
+            link = str(item.get("href") or item.get("url") or "").strip()
+            if not link:
+                continue
+            hits.append(
+                SearchHit(
+                    url=link,
+                    title=str(item.get("title") or ""),
+                    snippet=str(item.get("body") or item.get("snippet") or ""),
+                    provider=self.provider_name,
+                )
+            )
+        return hits
+
+
+class FallbackSearchProvider:
+    """Wraps a primary SearchProvider and falls back cleanly on HTTP/auth errors."""
+
+    def __init__(self, primary: SearchProvider, fallback: SearchProvider) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.provider_name = primary.provider_name
+
+    async def search(
+        self,
+        query: str,
+        *,
+        days: int = 7,
+        max_results: int = 20,
+    ) -> list[SearchHit]:
+        try:
+            return await self.primary.search(query, days=days, max_results=max_results)
+        except Exception as exc:
+            logger.warning(
+                "Primary search provider '{}' failed ({}); falling back to '{}'.",
+                self.primary.provider_name,
+                exc,
+                self.fallback.provider_name,
+            )
+            return await self.fallback.search(query, days=days, max_results=max_results)
+
+
 def build_search_provider(
     settings: DootSettings,
     client: httpx.AsyncClient,
     rate_limiter: DomainRateLimiter,
+    *,
+    allow_ddg_fallback: bool = True,
 ) -> SearchProvider | None:
-    """Construct the configured SearchProvider if an API key is available."""
+    """Construct the configured SearchProvider (with optional zero-key DDG fallback)."""
     provider = settings.search_provider.strip().lower()
+    ddg = DuckDuckGoSearchProvider(rate_limiter)
+    primary: SearchProvider | None = None
+
     if provider == "serper" and settings.serper_api_key.get_secret_value():
-        return SerperSearchProvider(
+        primary = SerperSearchProvider(
             settings.serper_api_key.get_secret_value(), client, rate_limiter
         )
-    if provider == "brave" and settings.brave_api_key.get_secret_value():
-        return BraveSearchProvider(
+    elif provider == "brave" and settings.brave_api_key.get_secret_value():
+        primary = BraveSearchProvider(
             settings.brave_api_key.get_secret_value(), client, rate_limiter
         )
-    if provider == "tavily" and settings.tavily_api_key.get_secret_value():
-        return TavilySearchProvider(
+    elif provider == "tavily" and settings.tavily_api_key.get_secret_value():
+        primary = TavilySearchProvider(
             settings.tavily_api_key.get_secret_value(), client, rate_limiter
         )
+
+    if primary is not None:
+        return FallbackSearchProvider(primary, ddg) if allow_ddg_fallback else primary
+    if provider == "ddg" or allow_ddg_fallback:
+        return ddg
     return None

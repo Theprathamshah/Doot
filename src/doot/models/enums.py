@@ -90,6 +90,7 @@ ALLOWED_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
         {
             JobStatus.PREPARED,
             JobStatus.SCORED,
+            JobStatus.FILTERED_OUT,
             JobStatus.NEEDS_MANUAL_ACTION,
             JobStatus.SKIPPED,
         }

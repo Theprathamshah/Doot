@@ -1,6 +1,6 @@
 """Domain models for jobs, companies, scoring, and tailored assets."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from doot.models.enums import ATSProvider, CompanySource, JobStatus
 
@@ -86,6 +86,14 @@ class ScoreResult(BaseModel):
     missing_skills: list[str] = Field(default_factory=list)
     india_remote_eligible: bool = True
     detected_seniority: str = "mid"
+
+    @field_validator("reasoning", mode="before")
+    @classmethod
+    def _clamp_reasoning(cls, value: object) -> str:
+        text = " ".join(str(value or "").split())
+        if len(text) <= 500:
+            return text
+        return text[:497].rstrip() + "..."
 
 
 class TailoredAssets(BaseModel):

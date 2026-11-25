@@ -118,6 +118,36 @@ CREATE TABLE IF NOT EXISTS runs (
     stats_json TEXT,
     error_message TEXT
 );
+
+CREATE TABLE IF NOT EXISTS contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    company_name TEXT NOT NULL,
+    person_name TEXT NOT NULL DEFAULT '',
+    role_title TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL,
+    confidence TEXT NOT NULL DEFAULT 'pattern',
+    source TEXT NOT NULL DEFAULT 'dork',
+    linkedin_url TEXT,
+    emailed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (email, company_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_job_id ON contacts(job_id);
+
+CREATE TABLE IF NOT EXISTS outreach_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFTED',
+    sent_at TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 """
 
 

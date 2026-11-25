@@ -24,8 +24,7 @@ _GEO_BLOCK_PATTERNS: tuple[re.Pattern[str], ...] = (
 _SENIORITY_BLOCK_TITLES: tuple[str, ...] = (
     "intern",
     "internship",
-    "staff engineer",
-    "staff software",
+    "staff ",
     "principal",
     "distinguished",
     "director",
@@ -43,42 +42,47 @@ _UNRELATED_TITLE_KEYWORDS: tuple[str, ...] = (
     "salesforce",
     "sap ",
     "manual qa",
+    "qa analyst",
+    "jira administrator",
+    "embedded linux",
+    "iot field",
     "recruiter",
     "talent acquisition",
     "account executive",
     "sales manager",
+    "enterprise sales",
+    "key accounts",
     "marketing",
     "customer support",
+    "product manager",
+    "program manager",
+    "project manager",
+    "associate manager",
+    "cluster manager",
+    "regional manager",
+    "group manager",
+    "communication designer",
+    "graphic designer",
+    "ui/ux",
+    "corporate strategy",
+    "business analyst",
+    "banking alliances",
+    "audit",
+    "finance",
+    "aeo",
+    "seo",
+    "best remote it jobs",
+    "jobs around the world",
 )
 
-_POSITIVE_TECH_KEYWORDS: tuple[str, ...] = (
-    "backend",
-    "back-end",
-    "full stack",
-    "fullstack",
-    "full-stack",
-    "software engineer",
-    "software developer",
-    "sde",
-    "platform",
-    "distributed",
-    "microservice",
-    "aws",
-    "cloud",
-    "java",
-    "spring",
-    "node",
-    "typescript",
-    "react",
-    "next.js",
-    "python",
-    "ai ",
-    "ai/",
-    "llm",
-    "rag",
-    "mcp",
-    "agent",
-    "api",
+_POSITIVE_TECH_PATTERN = re.compile(
+    r"\b(?:"
+    r"backend|back-end|full[\s-]?stack|software\s+engineer|software\s+developer|"
+    r"sde|platform\s+engineer|distributed\s+systems|microservices?|aws|cloud\s+engineer|"
+    r"java|spring\s+boot|quarkus|node\.?js|typescript|react|next\.?js|python|"
+    r"llm|llms|rag|mcp|ai\s+engineer|generative\s+ai"
+    r")\b",
+    re.IGNORECASE,
 )
 
 _YEARS_PATTERN = re.compile(r"\b(\d{1,2})\s*\+?\s*(?:to\s*\d{1,2}\s*)?years?\b", re.IGNORECASE)
@@ -146,8 +150,8 @@ def evaluate_rule_filter(
             f"{profile.years_of_experience} yrs)",
         )
 
-    haystack = f" {job.title.lower()} {job.jd_text.lower()} "
-    if not any(kw in haystack for kw in _POSITIVE_TECH_KEYWORDS):
+    haystack = f"{job.title}\n{job.jd_text}"
+    if not _POSITIVE_TECH_PATTERN.search(haystack):
         return RuleFilterDecision(False, "no overlap with target backend/fullstack/AWS/AI stack")
 
     return RuleFilterDecision(True, "passed stage 1 rules")

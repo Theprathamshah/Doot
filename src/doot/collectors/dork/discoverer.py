@@ -25,6 +25,55 @@ def _infer_company_from_url(url: str) -> str:
     return host.split(".")[0].title() if host else "Unknown"
 
 
+_INDIA_CITY_TOKENS: tuple[tuple[str, str], ...] = (
+    ("bengaluru", "Bengaluru, India"),
+    ("bangalore", "Bengaluru, India"),
+    ("hyderabad", "Hyderabad, India"),
+    ("pune", "Pune, India"),
+    ("gurugram", "Gurugram, India"),
+    ("gurgaon", "Gurugram, India"),
+    ("noida", "Noida, India"),
+    ("mumbai", "Mumbai, India"),
+    ("chennai", "Chennai, India"),
+    ("ahmedabad", "Ahmedabad, India"),
+    ("delhi", "Delhi NCR, India"),
+)
+
+
+def _infer_location_from_hit(hit: SearchHit) -> str:
+    combined = f"{hit.url} {hit.title} {hit.snippet}".lower()
+    is_remote = "remote" in combined
+    for token, formatted in _INDIA_CITY_TOKENS:
+        if token in combined:
+            return f"{formatted} (Remote/Hybrid)" if is_remote else formatted
+    if is_remote and "india" in combined:
+        return "Remote (India)"
+    if is_remote:
+        return "Remote"
+    if "india" in combined:
+        return "India"
+    return ""
+
+
+def _infer_title_and_company(hit: SearchHit) -> tuple[str, str]:
+    raw_title = hit.title.strip()
+    # LinkedIn format: "Backend Engineer - Acme Corp | LinkedIn" or "Acme hiring Backend Engineer"
+    cleaned = re.sub(r"\s*\|\s*(?:LinkedIn|Wellfound|AngelList).*$", "", raw_title, flags=re.I)
+    if " hiring " in cleaned.lower():
+        parts = re.split(r"\s+hiring\s+", cleaned, maxsplit=1, flags=re.I)
+        if len(parts) == 2:
+            return parts[1].strip(), parts[0].strip()
+    if " - " in cleaned:
+        left, right = cleaned.rsplit(" - ", 1)
+        if left and right and len(right) <= 50:
+            return left.strip(), right.strip()
+    if " at " in cleaned.lower():
+        parts = re.split(r"\s+at\s+", cleaned, maxsplit=1, flags=re.I)
+        if len(parts) == 2:
+            return parts[0].strip(), parts[1].strip()
+    return cleaned or hit.url, _infer_company_from_url(hit.url)
+
+
 @dataclass(slots=True)
 class DorkDiscoveryResult:
     """Output of a Dork-to-Crawl sweep."""
@@ -87,17 +136,19 @@ class DorkDiscoverer:
                         )
                     continue
 
-                # Non-ATS hit (e.g., Wellfound or custom careers page) -> alert_only RawJob
+                # Non-ATS hit (e.g., Wellfound, LinkedIn, or custom careers page) -> alert_only
                 ext_id = hashlib.sha256(hit.url.encode("utf-8")).hexdigest()[:24]
+                inferred_title, inferred_company = _infer_title_and_company(hit)
+                inferred_loc = _infer_location_from_hit(hit)
                 result.alert_only_jobs.append(
                     RawJob(
                         source="dork",
                         external_job_id=ext_id,
-                        title=hit.title.strip() or hit.url,
-                        company_name=_infer_company_from_url(hit.url),
+                        title=inferred_title,
+                        company_name=inferred_company,
                         canonical_url=hit.url,
                         apply_url=hit.url,
-                        location_raw="",
+                        location_raw=inferred_loc,
                         jd_text=hit.snippet,
                         alert_only=True,
                     )
