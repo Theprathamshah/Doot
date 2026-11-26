@@ -23,15 +23,35 @@ class DootSettings(BaseSettings):
     # LLM configuration (Gemini API primary; zero local model downloads)
     llm_provider: str = "gemini"
     gemini_api_key: SecretStr = SecretStr("")
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_fallback_models: list[str] = Field(
         default_factory=lambda: [
+            "gemini-3.1-flash-lite",
             "gemini-2.5-flash-lite",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
+            "gemini-3-flash-preview",
+            "gemini-4-hydrogen",
+            "gemini-2.5-flash",
+            "gemma-4-31b-it",
+            "gemma-4-26b-a4b-it",
         ]
     )
-    llm_min_interval_seconds: float = Field(default=6.0, ge=0.0)
+    gemini_tailor_models: list[str] = Field(
+        default_factory=lambda: [
+            "gemini-3.8-flash",
+            "gemini-4-hydrogen",
+            "gemini-3.6-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemma-4-31b-it",
+            "gemma-4-26b-a4b-it",
+        ]
+    )
+    llm_min_interval_seconds: float = Field(default=4.2, ge=0.0)
     fallback_to_local_on_quota: bool = True
 
     # Discovery configuration (Phase 2)

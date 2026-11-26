@@ -90,9 +90,9 @@ async def run_scoring_pipeline(
                 active_llm = llm_provider or build_llm_provider(settings)
 
         redacted_profile = build_redacted_profile_summary(profile, resume_markdown)
-        model_name = active_llm.model_name if active_llm is not None else settings.gemini_model
 
         for job in discovered:
+            model_name = active_llm.model_name if active_llm is not None else settings.gemini_model
             summary.evaluated += 1
             company = companies_by_id.get(job.company_id) if job.company_id is not None else None
             decision = evaluate_rule_filter(
@@ -127,6 +127,9 @@ async def run_scoring_pipeline(
             try:
                 result = await active_llm.score_job(redacted_profile, untrusted_payload)
                 used_actor = "scorer"
+                cache_key = compute_score_cache_key(
+                    job.jd_hash, profile.profile_version, active_llm.model_name
+                )
             except DailyQuotaExceededError as exc:
                 summary.quota_exhausted = True
                 summary.errors.append(str(exc))

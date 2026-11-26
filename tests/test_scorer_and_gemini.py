@@ -361,3 +361,83 @@ async def test_gemini_rotates_fallback_models_and_pipeline_falls_back_to_local(
     assert fb_summary.failed == 0
     stored = await repo.get_job(jid)
     assert stored is not None and stored.status == JobStatus.SCORED
+
+
+async def test_gemini_task_routing_503_cooldown_and_gemma_plain_json_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from google.genai import errors
+
+    calls: list[tuple[str, bool, int]] = []
+
+    class _TaskAndGemmaFakeModels:
+        async def generate_content(self, **kwargs: object) -> object:
+            model = str(kwargs["model"])
+            has_mime = getattr(kwargs.get("config"), "response_mime_type", None) is not None
+            calls.append((model, has_mime, len(str(kwargs.get("contents", "")))))
+
+            if model == "gemini-3.5-flash-lite":
+                raise errors.APIError(
+                    503,
+                    {"error": {"message": "Model overloaded", "status": "UNAVAILABLE"}},
+                    None,
+                )
+            if model == "gemma-4-31b-it" and has_mime:
+                raise errors.APIError(
+                    400,
+                    {"error": {"message": "Developer instruction is not enabled"}},
+                    None,
+                )
+            if model == "gemma-4-31b-it":
+                return SimpleNamespace(
+                    parsed=None,
+                    text=(
+                        '```json\n{"score": 4, "should_apply": true, '
+                        '"reasoning": "Gemma fallback OK.", "missing_skills": [], '
+                        '"india_remote_eligible": true, "detected_seniority": "mid"}\n```'
+                    ),
+                )
+            # Tailor model response
+            return SimpleNamespace(
+                parsed=None,
+                text=json.dumps(
+                    {
+                        "tailored_summary": "AWS Lambda + Java engineer.",
+                        "cover_note": "Relevant distributed backend experience.",
+                        "outreach_dm": "Hi, saw the Backend role.",
+                        "cited_story_ids": ["lambda-30x"],
+                    }
+                ),
+            )
+
+    async def _noop_sleep(_sec: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _noop_sleep)
+
+    fake_client = SimpleNamespace(aio=SimpleNamespace(models=_TaskAndGemmaFakeModels()))
+    provider = GeminiLLMProvider(
+        api_key="dummy-key",
+        model_name="gemini-3.5-flash-lite",
+        fallback_models=["gemma-4-31b-it"],
+        tailor_models=["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        client=fake_client,
+    )
+
+    # 503 on 3.5-flash-lite puts it on cooldown and rotates to gemma-4-31b-it,
+    # which falls back cleanly to plain JSON and trims JD for Gemma's 16K TPM cap
+    score = await provider.score_job("3 YOE AWS", "Backend Engineer " + ("x" * 7000))
+    assert score.score == 4
+    assert score.reasoning == "Gemma fallback OK."
+    assert provider.model_name == "gemma-4-31b-it"
+    gemma_plain_call = [c for c in calls if c[0] == "gemma-4-31b-it" and not c[1]][0]
+    assert gemma_plain_call[2] < 4600
+
+    # Tailoring routes directly to tailor_models (`gemini-3.8-flash`), not Lite/Gemma
+    tailored = await provider.draft_tailoring(
+        ["[story:lambda-30x] Cut latency 30x"], make_sample_job()
+    )
+    assert tailored.cited_story_ids == ["lambda-30x"]
+    assert calls[-1][:2] == ("gemini-3.8-flash", True)
