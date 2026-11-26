@@ -25,6 +25,8 @@
         --success-dark: #4ade80;
         --warn-light: #b45309;
         --warn-dark: #fbbf24;
+        --danger-light: #b91c1c;
+        --danger-dark: #f87171;
 
         --bg: var(--bg-light);
         --surface: var(--surface-light);
@@ -35,6 +37,7 @@
         --accent: var(--accent-light);
         --success: var(--success-light);
         --warn: var(--warn-light);
+        --danger: var(--danger-light);
 
         @media (prefers-color-scheme: dark) {
           --bg: var(--bg-dark);
@@ -46,6 +49,7 @@
           --accent: var(--accent-dark);
           --success: var(--success-dark);
           --warn: var(--warn-dark);
+          --danger: var(--danger-dark);
         }
 
         @supports (color: light-dark(white, black)) {
@@ -58,6 +62,7 @@
           --accent: light-dark(var(--accent-light), var(--accent-dark));
           --success: light-dark(var(--success-light), var(--success-dark));
           --warn: light-dark(var(--warn-light), var(--warn-dark));
+          --danger: light-dark(var(--danger-light), var(--danger-dark));
         }
 
         color-scheme: light dark;
@@ -228,6 +233,27 @@
         border-color: var(--success);
       }
 
+      .btn-danger {
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+
+      .btn-danger:hover {
+        background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+      }
+
+      .toolbar-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        align-items: center;
+        margin-block-end: 0.75rem;
+      }
+
+      .portal-input {
+        min-inline-size: 210px;
+      }
+
       .table-wrapper {
         overflow: auto;
         max-inline-size: 100%;
@@ -240,6 +266,7 @@
 
       table {
         inline-size: 100%;
+        min-inline-size: 920px;
         border-collapse: separate;
         border-spacing: 0;
         text-align: start;
@@ -248,12 +275,13 @@
         --label-2: "Company";
         --label-3: "Location";
         --label-4: "Score";
-        --label-5: "Mode";
+        --label-5: "Portal";
         --label-6: "Status";
-        --label-7: "Actions";
+        --label-7: "Added";
+        --label-8: "Actions";
       }
 
-      caption.sr-only {
+      .sr-only {
         position: absolute;
         inline-size: 1px;
         block-size: 1px;
@@ -273,6 +301,54 @@
         padding: 0.7rem 0.8rem;
         border-block-end: 1px solid var(--border);
         vertical-align: middle;
+      }
+
+      thead th:has(> button) {
+        padding: 0;
+      }
+
+      .sort-btn {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.35rem;
+        inline-size: 100%;
+        min-block-size: 36px;
+        padding: 0.7rem 0.8rem;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-weight: 700;
+        text-align: start;
+        cursor: pointer;
+      }
+
+      .sort-btn:hover {
+        background: color-mix(in srgb, var(--accent) 8%, var(--surface-alt));
+      }
+
+      .sort-btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+
+      .sort-icon::after {
+        content: "↕";
+        opacity: 0.35;
+        font-size: 0.78em;
+      }
+
+      th[aria-sort="ascending"] .sort-icon::after {
+        content: "▲";
+        opacity: 1;
+        color: var(--accent);
+      }
+
+      th[aria-sort="descending"] .sort-icon::after {
+        content: "▼";
+        opacity: 1;
+        color: var(--accent);
       }
 
       tbody th {
@@ -307,7 +383,11 @@
         gap: 0.4rem;
       }
 
-      @container (width < 700px) {
+      @container (width < 760px) {
+        table {
+          min-inline-size: 0;
+        }
+
         table,
         thead,
         tbody,
@@ -356,6 +436,10 @@
           content: var(--label-6) ": ";
           font-weight: 600;
         }
+        td:nth-child(7)::before {
+          content: var(--label-7) ": ";
+          font-weight: 600;
+        }
       }
 
       dialog {
@@ -400,6 +484,17 @@
         margin-block-end: 0.8rem;
         white-space: pre-wrap;
         font-size: 0.88rem;
+      }
+
+      .dialog-actions-end {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.65rem;
+        margin-block-start: 1rem;
+      }
+
+      dialog#confirm-delete-dialog {
+        inline-size: min(440px, 92vw);
       }
 
       .pagination {
@@ -452,31 +547,100 @@
         <button type="button" role="tab" class="tab-btn" data-view="filtered" aria-selected="false">Filtered Out</button>
       </div>
 
-      <div class="toolbar">
-        <input type="search" id="search-input" aria-label="Search jobs" placeholder="Search company, role, location, AWS, Java, RAG..." />
-        <select id="min-score-select" aria-label="Minimum score">
+      <div class="toolbar-row">
+        <input
+          type="search"
+          id="search-input"
+          aria-label="Search jobs"
+          placeholder="Search company, role, location, AWS, Java, or URL..."
+        />
+        <input
+          type="search"
+          id="portal-input"
+          class="portal-input"
+          list="portal-options"
+          aria-label="Search by job portal"
+          placeholder="Job portal (ashby, wellfound, linkedin...)"
+        />
+        <datalist id="portal-options"></datalist>
+        <select id="sort-select" aria-label="Sort jobs">
+          <option value="score_best:desc">Sort: Best Match (Score ↓, Newest)</option>
+          <option value="discovered_at:desc">Sort: Added Time (Newest First)</option>
+          <option value="discovered_at:asc">Sort: Added Time (Oldest First)</option>
+          <option value="llm_score:desc">Sort: Score (High → Low)</option>
+          <option value="llm_score:asc">Sort: Score (Low → High)</option>
+          <option value="company_name:asc">Sort: Company (A → Z)</option>
+          <option value="title:asc">Sort: Role (A → Z)</option>
+          <option value="source:asc">Sort: Portal (A → Z)</option>
+        </select>
+      </div>
+
+      <div class="toolbar-row">
+        <select id="min-score-select" aria-label="Score filter">
           <option value="0">Any Score</option>
+          <option value="3">Score 3+</option>
           <option value="4">Score 4+</option>
           <option value="5">Score 5 only</option>
+          <option value="unscored">Unscored only</option>
+        </select>
+        <select id="status-select" aria-label="Status filter">
+          <option value="">Any Status</option>
+          <option value="DISCOVERED">DISCOVERED</option>
+          <option value="SCORED">SCORED</option>
+          <option value="NOTIFIED">NOTIFIED</option>
+          <option value="PREPARED">PREPARED</option>
+          <option value="AWAITING_APPROVAL">AWAITING_APPROVAL</option>
+          <option value="APPLIED">APPLIED</option>
+          <option value="SKIPPED">SKIPPED</option>
+          <option value="FILTERED_OUT">FILTERED_OUT</option>
+        </select>
+        <select id="remote-select" aria-label="Work mode filter">
+          <option value="">Work Mode: Any</option>
+          <option value="true">Remote only</option>
+          <option value="false">Hybrid / Onsite</option>
+        </select>
+        <select id="added-days-select" aria-label="Added timeframe filter">
+          <option value="">Added: Any time</option>
+          <option value="1">Added: Last 24h</option>
+          <option value="7">Added: Last 7 days</option>
+          <option value="30">Added: Last 30 days</option>
         </select>
         <label class="checkbox-label">
           <input type="checkbox" id="ats-only-checkbox" />
-          Direct ATS only (Greenhouse / Lever / Ashby)
+          Direct ATS only
         </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="india-only-checkbox" />
+          India eligible
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="salary-only-checkbox" />
+          Has salary
+        </label>
+        <select id="limit-select" aria-label="Rows per page">
+          <option value="25">25 / page</option>
+          <option value="50" selected>50 / page</option>
+          <option value="100">100 / page</option>
+          <option value="200">200 / page</option>
+        </select>
+        <button type="button" class="btn" id="reset-filters-btn">Reset Filters</button>
       </div>
 
+      <div id="table-status" role="status" class="sr-only"></div>
+
       <div tabindex="0" role="region" aria-labelledby="jobs-table-caption" class="table-wrapper">
-        <table>
+        <table id="jobs-table">
           <caption id="jobs-table-caption" class="sr-only">Discovered and selected jobs</caption>
           <thead>
             <tr>
-              <th>Role</th>
-              <th>Company</th>
-              <th>Location</th>
-              <th>Score</th>
-              <th>Mode</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th scope="col"><button type="button" class="sort-btn" commandfor="jobs-table" command="--sort" data-sort="title">Role<span class="sort-icon" aria-hidden="true"></span></button></th>
+              <th scope="col"><button type="button" class="sort-btn" commandfor="jobs-table" command="--sort" data-sort="company_name">Company<span class="sort-icon" aria-hidden="true"></span></button></th>
+              <th scope="col"><button type="button" class="sort-btn" commandfor="jobs-table" command="--sort" data-sort="location_raw">Location<span class="sort-icon" aria-hidden="true"></span></button></th>
+              <th scope="col"><button type="button" class="sort-btn" commandfor="jobs-table" command="--sort" data-sort="llm_score">Score<span class="sort-icon" aria-hidden="true"></span></button></th>
+              <th scope="col"><button type="button" class="sort-btn" commandfor="jobs-table" command="--sort" data-sort="source">Portal<span class="sort-icon" aria-hidden="true"></span></button></th>
+              <th scope="col"><button type="button" class="sort-btn" commandfor="jobs-table" command="--sort" data-sort="status">Status<span class="sort-icon" aria-hidden="true"></span></button></th>
+              <th scope="col"><button type="button" class="sort-btn" commandfor="jobs-table" command="--sort" data-sort="discovered_at">Added<span class="sort-icon" aria-hidden="true"></span></button></th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody id="jobs-tbody"></tbody>
@@ -503,41 +667,79 @@
         </form>
       </div>
 
-      <div id="dialog-actions" class="toolbar"></div>
+      <div id="dialog-actions" class="toolbar-row"></div>
       <div id="dialog-reasoning" class="section-box"></div>
       <div id="dialog-tailor" class="section-box" hidden></div>
       <div id="dialog-contacts" class="section-box" hidden></div>
       <div id="dialog-jd" class="section-box"></div>
     </dialog>
 
+    <dialog id="confirm-delete-dialog" closedby="any" aria-labelledby="confirm-delete-title">
+      <h1 id="confirm-delete-title">Delete this job posting?</h1>
+      <p id="confirm-delete-desc" class="subtitle"></p>
+      <form method="dialog" class="dialog-actions-end">
+        <button type="submit" value="cancel" class="btn" autofocus>Cancel</button>
+        <button type="submit" value="delete" class="btn btn-danger">Delete Job</button>
+      </form>
+    </dialog>
+
     <script>
       const state = {
         view: "selected",
         q: "",
+        portal: "",
         minScore: 0,
+        unscoredOnly: false,
+        status: "",
+        remote: "",
+        addedDays: "",
         atsOnly: false,
+        indiaOnly: false,
+        hasSalary: false,
+        sortBy: "score_best",
+        sortDir: "desc",
         limit: 50,
         offset: 0,
         total: 0,
       };
 
       const tbody = document.getElementById("jobs-tbody");
+      const jobsTable = document.getElementById("jobs-table");
       const metaEl = document.getElementById("results-meta");
+      const statusLiveEl = document.getElementById("table-status");
       const dialog = document.getElementById("job-dialog");
+      const confirmDeleteDialog = document.getElementById("confirm-delete-dialog");
+      let pendingDeleteJob = null;
+      let activeDialogJobId = null;
 
-      // Light-dismiss fallback for browsers without <dialog closedby="any">
-      if (!("closedBy" in HTMLDialogElement.prototype)) {
-        const outside = (e) => {
-          const r = dialog.getBoundingClientRect();
-          return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
-        };
-        let pressedOutside = false;
-        dialog.addEventListener("pointerdown", (e) => { pressedOutside = outside(e); });
-        dialog.addEventListener("pointerup", (e) => { if (pressedOutside && outside(e)) dialog.close(); });
+      function wireDialogDismiss(dlg) {
+        if (!("closedBy" in HTMLDialogElement.prototype)) {
+          const outside = (e) => {
+            const r = dlg.getBoundingClientRect();
+            return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+          };
+          let pressedOutside = false;
+          dlg.addEventListener("pointerdown", (e) => { pressedOutside = outside(e); });
+          dlg.addEventListener("pointerup", (e) => { if (pressedOutside && outside(e)) dlg.close(); });
+        }
       }
+
+      wireDialogDismiss(dialog);
+      wireDialogDismiss(confirmDeleteDialog);
 
       dialog.addEventListener("close", () => {
         dialog.returnValue = "";
+        activeDialogJobId = null;
+      });
+
+      confirmDeleteDialog.addEventListener("close", async () => {
+        const choice = confirmDeleteDialog.returnValue;
+        confirmDeleteDialog.returnValue = "";
+        const target = pendingDeleteJob;
+        pendingDeleteJob = null;
+        if (choice === "delete" && target) {
+          await deleteJob(target.id, target.title);
+        }
       });
 
       function el(tag, className, text) {
@@ -558,6 +760,66 @@
         return a;
       }
 
+      function formatAddedTime(iso) {
+        if (!iso) return "-";
+        const normalized = iso.includes("T") ? iso : `${iso.replace(" ", "T")}Z`;
+        const date = new Date(normalized);
+        if (Number.isNaN(date.getTime())) return String(iso);
+        const diffSec = Math.round((date.getTime() - Date.now()) / 1000);
+        const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+        if (Math.abs(diffSec) < 3600) return rtf.format(Math.round(diffSec / 60), "minute");
+        if (Math.abs(diffSec) < 86400) return rtf.format(Math.round(diffSec / 3600), "hour");
+        if (Math.abs(diffSec) < 2592000) return rtf.format(Math.round(diffSec / 86400), "day");
+        return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+      }
+
+      function syncHeaderAriaSort() {
+        for (const th of jobsTable.tHead.rows[0].cells) {
+          th.removeAttribute("aria-sort");
+          const btn = th.querySelector("button[data-sort]");
+          if (btn && btn.dataset.sort === state.sortBy) {
+            th.setAttribute("aria-sort", state.sortDir === "asc" ? "ascending" : "descending");
+          }
+        }
+      }
+
+      function syncSortDropdown() {
+        const sortSelect = document.getElementById("sort-select");
+        const val = `${state.sortBy}:${state.sortDir}`;
+        if ([...sortSelect.options].some((o) => o.value === val)) {
+          sortSelect.value = val;
+        }
+      }
+
+      function sortByHeaderButton(button) {
+        const key = button.dataset.sort;
+        if (!key) return;
+        const th = button.closest("th");
+        const nextDir =
+          state.sortBy === key
+            ? (state.sortDir === "asc" ? "desc" : "asc")
+            : (key === "discovered_at" || key === "llm_score" ? "desc" : "asc");
+        state.sortBy = key;
+        state.sortDir = nextDir;
+        state.offset = 0;
+        syncHeaderAriaSort();
+        syncSortDropdown();
+        statusLiveEl.textContent = `Sorting by ${button.textContent.trim()}, ${nextDir === "asc" ? "ascending" : "descending"}`;
+        loadJobs();
+      }
+
+      jobsTable.addEventListener("command", (event) => {
+        if (event.command === "--sort" && event.source) {
+          sortByHeaderButton(event.source);
+        }
+      });
+
+      if (!("commandForElement" in HTMLButtonElement.prototype)) {
+        for (const button of jobsTable.tHead.querySelectorAll('button[command="--sort"]')) {
+          button.addEventListener("click", () => sortByHeaderButton(button));
+        }
+      }
+
       async function loadStats() {
         const res = await fetch("/api/stats");
         const data = await res.json();
@@ -566,6 +828,38 @@
         document.getElementById("stat-applied").textContent = String(data.funnel?.APPLIED ?? 0);
         document.getElementById("stat-companies").textContent = String(data.active_companies ?? 0);
         document.getElementById("stat-contacts").textContent = String(data.contacts_count ?? 0);
+
+        const datalist = document.getElementById("portal-options");
+        if (Array.isArray(data.portals)) {
+          const opts = data.portals.map((item) => {
+            const opt = document.createElement("option");
+            opt.value = item.portal;
+            opt.label = `${item.portal} (${item.count})`;
+            return opt;
+          });
+          datalist.replaceChildren(...opts);
+        }
+      }
+
+      function requestDeleteJob(job) {
+        pendingDeleteJob = job;
+        document.getElementById("confirm-delete-desc").textContent =
+          `Delete "${job.title}" at ${job.company_name} (#${job.id}) permanently from the database?`;
+        confirmDeleteDialog.showModal();
+      }
+
+      async function deleteJob(jobId, title) {
+        const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(err.error || "Could not delete job");
+          return;
+        }
+        if (activeDialogJobId === jobId && dialog.open) {
+          dialog.close();
+        }
+        statusLiveEl.textContent = `Deleted job ${title || jobId}`;
+        await Promise.all([loadStats(), loadJobs()]);
       }
 
       async function updateStatus(jobId, status) {
@@ -586,10 +880,11 @@
         const res = await fetch(`/api/jobs/${jobId}`);
         if (!res.ok) return;
         const job = await res.json();
+        activeDialogJobId = job.id;
 
         document.getElementById("dialog-title").textContent = `${job.title}`;
         document.getElementById("dialog-subtitle").textContent =
-          `${job.company_name} | ${job.location_raw || "Unspecified"} | Score: ${job.llm_score ?? "-"}/5 | Status: ${job.status}`;
+          `${job.company_name} | ${job.location_raw || "Unspecified"} | Portal: ${job.portal || job.source} | Score: ${job.llm_score ?? "-"}/5 | Status: ${job.status} | Added: ${formatAddedTime(job.discovered_at)}`;
 
         const actionsEl = document.getElementById("dialog-actions");
         const tailorBox = document.getElementById("dialog-tailor");
@@ -603,6 +898,10 @@
         const skipBtn = el("button", "btn", "Skip");
         skipBtn.type = "button";
         skipBtn.onclick = async () => { await updateStatus(job.id, "SKIPPED"); dialog.close(); };
+
+        const deleteBtn = el("button", "btn btn-danger", "Delete");
+        deleteBtn.type = "button";
+        deleteBtn.onclick = () => requestDeleteJob(job);
 
         const tailorBtn = el("button", "btn", "Generate RAG Tailor");
         tailorBtn.type = "button";
@@ -641,7 +940,7 @@
           await loadStats();
         };
 
-        actionsEl.replaceChildren(applyAnchor, applyBtn, skipBtn, tailorBtn, contactsBtn);
+        actionsEl.replaceChildren(applyAnchor, applyBtn, skipBtn, tailorBtn, contactsBtn, deleteBtn);
 
         const missing = (job.missing_skills && job.missing_skills.length) ? job.missing_skills.join(", ") : "None";
         document.getElementById("dialog-reasoning").textContent =
@@ -672,8 +971,17 @@
         const params = new URLSearchParams({
           view: state.view,
           q: state.q,
+          portal: state.portal,
           min_score: String(state.minScore),
+          unscored_only: String(state.unscoredOnly),
+          status: state.status,
+          remote: state.remote,
+          added_days: state.addedDays,
           ats_only: String(state.atsOnly),
+          india_only: String(state.indiaOnly),
+          has_salary: String(state.hasSalary),
+          sort_by: state.sortBy,
+          sort_dir: state.sortDir,
           limit: String(state.limit),
           offset: String(state.offset),
         });
@@ -692,19 +1000,27 @@
           titleTh.appendChild(titleBtn);
 
           const companyTd = el("td", "", job.company_name);
-          const locTd = el("td", "", job.location_raw || "-");
+          const locTd = el("td", "", job.location_raw || (job.is_remote ? "Remote" : "-"));
 
           const scoreTd = document.createElement("td");
           const scoreVal = job.llm_score ?? "-";
           const scoreCls = job.llm_score >= 5 ? "badge badge-score-5" : (job.llm_score === 4 ? "badge badge-score-4" : "badge");
           scoreTd.appendChild(el("span", scoreCls, `${scoreVal}/5`));
 
-          const modeText = job.alert_only ? `${job.source} (alert)` : `${job.ats_provider || job.source}`;
+          const portalText = job.portal || (job.alert_only ? `${job.source} (alert)` : `${job.ats_provider || job.source}`);
           const modeTd = document.createElement("td");
-          modeTd.appendChild(el("span", "badge", modeText));
+          modeTd.appendChild(el("span", "badge", job.alert_only ? `${portalText} (alert)` : portalText));
 
           const statusTd = document.createElement("td");
           statusTd.appendChild(el("span", "badge", job.status));
+
+          const addedTd = document.createElement("td");
+          const timeEl = el("time", "subtitle", formatAddedTime(job.discovered_at));
+          if (job.discovered_at) {
+            timeEl.dateTime = job.discovered_at;
+            timeEl.title = job.discovered_at;
+          }
+          addedTd.appendChild(timeEl);
 
           const actionsTd = el("td", "actions-cell");
           actionsTd.appendChild(safeApplyLink(job.apply_url, "Apply ↗"));
@@ -723,14 +1039,20 @@
             actionsTd.appendChild(skipBtn);
           }
 
-          tr.append(titleTh, companyTd, locTd, scoreTd, modeTd, statusTd, actionsTd);
+          const delBtn = el("button", "btn btn-danger", "Delete");
+          delBtn.type = "button";
+          delBtn.setAttribute("aria-label", `Delete ${job.title} at ${job.company_name}`);
+          delBtn.onclick = () => requestDeleteJob(job);
+          actionsTd.appendChild(delBtn);
+
+          tr.append(titleTh, companyTd, locTd, scoreTd, modeTd, statusTd, addedTd, actionsTd);
           rows.push(tr);
         }
 
         if (rows.length === 0) {
           const emptyTr = document.createElement("tr");
           const emptyTd = el("td", "subtitle", "No jobs match your current filters.");
-          emptyTd.colSpan = 7;
+          emptyTd.colSpan = 8;
           emptyTr.appendChild(emptyTd);
           rows.push(emptyTr);
         }
@@ -764,8 +1086,51 @@
         }, 200);
       });
 
+      let portalTimer;
+      document.getElementById("portal-input").addEventListener("input", (e) => {
+        clearTimeout(portalTimer);
+        portalTimer = setTimeout(() => {
+          state.portal = e.target.value;
+          state.offset = 0;
+          loadJobs();
+        }, 150);
+      });
+
+      document.getElementById("sort-select").addEventListener("change", (e) => {
+        const [sortBy, sortDir] = e.target.value.split(":");
+        state.sortBy = sortBy || "score_best";
+        state.sortDir = sortDir || "desc";
+        state.offset = 0;
+        syncHeaderAriaSort();
+        loadJobs();
+      });
+
       document.getElementById("min-score-select").addEventListener("change", (e) => {
-        state.minScore = Number(e.target.value);
+        if (e.target.value === "unscored") {
+          state.minScore = 0;
+          state.unscoredOnly = true;
+        } else {
+          state.unscoredOnly = false;
+          state.minScore = Number(e.target.value);
+        }
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("status-select").addEventListener("change", (e) => {
+        state.status = e.target.value;
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("remote-select").addEventListener("change", (e) => {
+        state.remote = e.target.value;
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("added-days-select").addEventListener("change", (e) => {
+        state.addedDays = e.target.value;
         state.offset = 0;
         loadJobs();
       });
@@ -773,6 +1138,52 @@
       document.getElementById("ats-only-checkbox").addEventListener("change", (e) => {
         state.atsOnly = Boolean(e.target.checked);
         state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("india-only-checkbox").addEventListener("change", (e) => {
+        state.indiaOnly = Boolean(e.target.checked);
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("salary-only-checkbox").addEventListener("change", (e) => {
+        state.hasSalary = Boolean(e.target.checked);
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("limit-select").addEventListener("change", (e) => {
+        state.limit = Number(e.target.value);
+        state.offset = 0;
+        loadJobs();
+      });
+
+      document.getElementById("reset-filters-btn").addEventListener("click", () => {
+        state.q = "";
+        state.portal = "";
+        state.minScore = 0;
+        state.unscoredOnly = false;
+        state.status = "";
+        state.remote = "";
+        state.addedDays = "";
+        state.atsOnly = false;
+        state.indiaOnly = false;
+        state.hasSalary = false;
+        state.sortBy = "score_best";
+        state.sortDir = "desc";
+        state.offset = 0;
+        document.getElementById("search-input").value = "";
+        document.getElementById("portal-input").value = "";
+        document.getElementById("sort-select").value = "score_best:desc";
+        document.getElementById("min-score-select").value = "0";
+        document.getElementById("status-select").value = "";
+        document.getElementById("remote-select").value = "";
+        document.getElementById("added-days-select").value = "";
+        document.getElementById("ats-only-checkbox").checked = false;
+        document.getElementById("india-only-checkbox").checked = false;
+        document.getElementById("salary-only-checkbox").checked = false;
+        syncHeaderAriaSort();
         loadJobs();
       });
 
@@ -793,6 +1204,7 @@
         loadJobs();
       });
 
+      syncHeaderAriaSort();
       loadStats();
       loadJobs();
     </script>

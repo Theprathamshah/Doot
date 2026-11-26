@@ -34,6 +34,15 @@ def _safe_http_url(url: str) -> str:
     return url.strip() if parsed.scheme in ("http", "https") else ""
 
 
+def _portal_label(job: Any) -> str:
+    if job.ats_provider:
+        return str(job.ats_provider.value)
+    if job.source and job.source != "dork":
+        return str(job.source)
+    host = (urlparse(job.apply_url).hostname or "").lower().removeprefix("www.")
+    return host or str(job.source)
+
+
 def _serialize_job(job: Any) -> dict[str, Any]:
     return {
         "id": job.id,
@@ -45,6 +54,7 @@ def _serialize_job(job: Any) -> dict[str, Any]:
         "alert_only": job.alert_only,
         "ats_provider": job.ats_provider.value if job.ats_provider else None,
         "source": job.source,
+        "portal": _portal_label(job),
         "salary_raw": job.salary_raw,
         "apply_url": _safe_http_url(job.apply_url),
         "canonical_url": _safe_http_url(job.canonical_url),
@@ -55,6 +65,15 @@ def _serialize_job(job: Any) -> dict[str, Any]:
         "rule_filter_reason": job.rule_filter_reason,
         "discovered_at": job.discovered_at,
     }
+
+
+def _parse_optional_bool(raw: str | None) -> bool | None:
+    val = (raw or "").strip().lower()
+    if val in ("true", "1", "yes"):
+        return True
+    if val in ("false", "0", "no"):
+        return False
+    return None
 
 
 def create_web_app(
@@ -78,6 +97,7 @@ def create_web_app(
             _ = selected_jobs
             contacts = await repo.list_contacts(limit=500)
             companies = await repo.list_companies(active_only=True)
+            portals = await repo.list_portals()
             return JSONResponse(
                 {
                     "funnel": funnel,
@@ -85,6 +105,7 @@ def create_web_app(
                     "contacts_count": len(contacts),
                     "active_companies": len(companies),
                     "total_jobs": sum(funnel.values()),
+                    "portals": portals,
                 }
             )
 
@@ -93,9 +114,19 @@ def create_web_app(
         view = qp.get("view", "selected")
         q = qp.get("q", "")
         source = qp.get("source", "")
+        portal = qp.get("portal", "")
         ats_only = qp.get("ats_only", "false").lower() == "true"
+        remote_only = _parse_optional_bool(qp.get("remote"))
+        india_only = qp.get("india_only", "false").lower() == "true"
+        has_salary = qp.get("has_salary", "false").lower() == "true"
+        unscored_only = qp.get("unscored_only", "false").lower() == "true"
+        status_filter = qp.get("status", "")
+        sort_by = qp.get("sort_by", "score_best")
+        sort_dir = qp.get("sort_dir", "desc")
+        added_days_raw = qp.get("added_days", "").strip()
         try:
             min_score = int(qp.get("min_score", "0"))
+            added_within_days = int(added_days_raw) if added_days_raw else None
             limit = min(max(int(qp.get("limit", "100")), 1), 500)
             offset = max(int(qp.get("offset", "0")), 0)
         except ValueError:
@@ -108,8 +139,17 @@ def create_web_app(
                 view=view,
                 query_text=q,
                 min_score=min_score,
+                unscored_only=unscored_only,
                 source=source,
+                portal=portal,
                 ats_only=ats_only,
+                remote_only=remote_only,
+                india_only=india_only,
+                has_salary=has_salary,
+                added_within_days=added_within_days,
+                status_filter=status_filter,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
                 limit=limit,
                 offset=offset,
             )
@@ -244,11 +284,27 @@ def create_web_app(
                 }
             )
 
+    async def api_delete_job(request: Request) -> JSONResponse:
+        job_id = int(request.path_params["job_id"])
+        try:
+            assert_not_stopped(cfg)
+        except SafetyGuardError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        async with open_connection(cfg.db_path) as conn:
+            await initialize_schema(conn)
+            repo = DootRepository(conn)
+            deleted = await repo.delete_job(job_id)
+            if not deleted:
+                return JSONResponse({"error": f"Job #{job_id} not found"}, status_code=404)
+            return JSONResponse({"deleted": True, "id": job_id})
+
     routes = [
         Route("/", index, methods=["GET"]),
         Route("/api/stats", api_stats, methods=["GET"]),
         Route("/api/jobs", api_list_jobs, methods=["GET"]),
         Route("/api/jobs/{job_id:int}", api_job_detail, methods=["GET"]),
+        Route("/api/jobs/{job_id:int}", api_delete_job, methods=["DELETE"]),
         Route("/api/jobs/{job_id:int}/status", api_update_status, methods=["POST"]),
         Route("/api/jobs/{job_id:int}/tailor", api_tailor_job, methods=["POST"]),
         Route("/api/jobs/{job_id:int}/find-contacts", api_find_contacts, methods=["POST"]),

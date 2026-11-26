@@ -46,6 +46,8 @@ def _seed_web_db(settings: DootSettings) -> tuple[int, int, int]:
             j_sel = make_sample_job(external_job_id="web-sel-1")
             j_sel.title = "Senior AWS Backend Engineer"
             j_sel.jd_text = "Build AWS Lambda and Spring Boot microservices."
+            j_sel.is_remote = True
+            j_sel.salary_raw = "30 LPA"
             id_sel, _ = await repo.upsert_job(j_sel)
             await repo.save_job_score(
                 id_sel,
@@ -141,3 +143,44 @@ def test_web_ui_endpoints_filters_xss_url_guard_and_actions(tmp_settings: DootSe
     # Cannot transition APPLIED -> SKIPPED (409 conflict)
     conflict = client.post(f"/api/jobs/{id_sel}/status", json={"status": "SKIPPED"})
     assert conflict.status_code == 409
+
+    # 6) Portal search & stats portals list
+    stats_after = client.get("/api/stats").json()
+    portal_names = {p["portal"] for p in stats_after["portals"]}
+    assert "jobicy" in portal_names
+    assert "greenhouse" in portal_names
+
+    jobicy_only = client.get("/api/jobs?view=all&portal=jobicy").json()
+    assert jobicy_only["total"] == 1
+    assert jobicy_only["jobs"][0]["id"] == id_low
+
+    # 7) Sorting by added time (discovered_at) & extra filters (remote / unscored)
+    asc_added = client.get("/api/jobs?view=all&sort_by=discovered_at&sort_dir=asc").json()
+    desc_added = client.get("/api/jobs?view=all&sort_by=discovered_at&sort_dir=desc").json()
+    assert [j["id"] for j in asc_added["jobs"]] == list(
+        reversed([j["id"] for j in desc_added["jobs"]])
+    )
+
+    remote_only = client.get("/api/jobs?view=all&remote=true").json()
+    assert remote_only["total"] == 1
+    assert remote_only["jobs"][0]["id"] == id_sel
+
+    onsite_only = client.get("/api/jobs?view=all&remote=false").json()
+    assert onsite_only["total"] == 2
+
+    salary_only = client.get("/api/jobs?view=all&has_salary=true").json()
+    assert salary_only["total"] == 1
+    assert salary_only["jobs"][0]["id"] == id_sel
+
+    # 8) Delete job posting from UI API
+    assert "confirm-delete-dialog" in home.text
+    assert 'commandfor="jobs-table"' in home.text
+
+    del_res = client.delete(f"/api/jobs/{id_low}")
+    assert del_res.status_code == 200
+    assert del_res.json() == {"deleted": True, "id": id_low}
+    assert client.get(f"/api/jobs/{id_low}").status_code == 404
+    assert client.delete(f"/api/jobs/{id_low}").status_code == 404
+
+    stats_final = client.get("/api/stats").json()
+    assert stats_final["total_jobs"] == 2

@@ -1,7 +1,9 @@
 """Persistence repository with enforced state transitions and audit logging."""
 
 import json
+from collections import Counter
 from typing import Any
+from urllib.parse import urlparse
 
 import aiosqlite
 
@@ -352,18 +354,59 @@ class DootRepository:
         rows = await cursor.fetchall()
         return [_row_to_job(r) for r in rows]
 
+    async def delete_job(self, job_id: int) -> bool:
+        """Delete a job posting and its cascading events/applications by ID."""
+        cursor = await self.conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        await self.conn.commit()
+        return cursor.rowcount > 0
+
+    async def list_portals(self, *, limit: int = 40) -> list[dict[str, Any]]:
+        """Return distinct job portals (`source`, `ats_provider`, or apply host) with counts."""
+        cursor = await self.conn.execute(
+            "SELECT source, ats_provider, apply_url FROM jobs"
+        )
+        rows = await cursor.fetchall()
+        counts: Counter[str] = Counter()
+        for row in rows:
+            src = str(row["source"] or "").strip().lower()
+            ats = str(row["ats_provider"] or "").strip().lower()
+            if ats:
+                counts[ats] += 1
+            elif src and src != "dork":
+                counts[src] += 1
+            else:
+                host = (urlparse(str(row["apply_url"] or "")).hostname or "").lower()
+                host = host.removeprefix("www.")
+                if host:
+                    counts[host] += 1
+                elif src:
+                    counts[src] += 1
+        return [
+            {"portal": portal, "count": count}
+            for portal, count in counts.most_common(limit)
+        ]
+
     async def query_jobs(
         self,
         *,
         view: str = "selected",
         query_text: str = "",
         min_score: int = 0,
+        unscored_only: bool = False,
         source: str = "",
+        portal: str = "",
         ats_only: bool = False,
+        remote_only: bool | None = None,
+        india_only: bool = False,
+        has_salary: bool = False,
+        added_within_days: int | None = None,
+        status_filter: str = "",
+        sort_by: str = "score_best",
+        sort_dir: str = "desc",
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[JobRecord], int]:
-        """Search and filter jobs for the local web dashboard."""
+        """Search, filter, and sort jobs for the local web dashboard."""
         clauses: list[str] = []
         params: list[Any] = []
 
@@ -378,25 +421,73 @@ class DootRepository:
         elif view == "filtered":
             clauses.append("status = 'FILTERED_OUT'")
         else:
-            # 'all' excludes nothing unless min_score / filters are set
-            if min_score > 0:
+            if unscored_only:
+                clauses.append("llm_score IS NULL")
+            elif min_score > 0:
                 clauses.append("COALESCE(llm_score, 0) >= ?")
                 params.append(min_score)
+
+        if status_filter.strip():
+            clauses.append("status = ?")
+            params.append(status_filter.strip().upper())
 
         if query_text.strip():
             like = f"%{query_text.strip().lower()}%"
             clauses.append(
                 "(LOWER(title) LIKE ? OR LOWER(company_name) LIKE ? "
-                "OR LOWER(location_raw) LIKE ? OR LOWER(jd_text) LIKE ?)"
+                "OR LOWER(location_raw) LIKE ? OR LOWER(jd_text) LIKE ? "
+                "OR LOWER(source) LIKE ? OR LOWER(COALESCE(ats_provider, '')) LIKE ? "
+                "OR LOWER(apply_url) LIKE ?)"
             )
-            params.extend([like, like, like, like])
+            params.extend([like, like, like, like, like, like, like])
 
         if source.strip():
             clauses.append("source = ?")
             params.append(source.strip())
 
+        if portal.strip():
+            p = portal.strip().lower()
+            p_like = f"%{p}%"
+            clauses.append(
+                "(LOWER(source) = ? OR LOWER(COALESCE(ats_provider, '')) = ? "
+                "OR LOWER(apply_url) LIKE ? OR LOWER(canonical_url) LIKE ?)"
+            )
+            params.extend([p, p, p_like, p_like])
+
         if ats_only:
             clauses.append("alert_only = 0")
+
+        if remote_only is True:
+            clauses.append("is_remote = 1")
+        elif remote_only is False:
+            clauses.append("is_remote = 0")
+
+        if india_only:
+            clauses.append("india_eligible = 1")
+
+        if has_salary:
+            clauses.append("salary_raw IS NOT NULL AND TRIM(salary_raw) != ''")
+
+        if added_within_days is not None and added_within_days > 0:
+            clauses.append("discovered_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)")
+            params.append(f"-{int(added_within_days)} days")
+
+        direction = "ASC" if sort_dir.strip().lower() == "asc" else "DESC"
+        order_map = {
+            "score_best": (
+                "COALESCE(llm_score, 0) DESC, alert_only ASC, discovered_at DESC, id DESC"
+            ),
+            "discovered_at": f"discovered_at {direction}, id {direction}",
+            "llm_score": f"COALESCE(llm_score, 0) {direction}, discovered_at DESC, id DESC",
+            "company_name": f"LOWER(company_name) {direction}, discovered_at DESC, id DESC",
+            "title": f"LOWER(title) {direction}, discovered_at DESC, id DESC",
+            "location_raw": f"LOWER(location_raw) {direction}, discovered_at DESC, id DESC",
+            "source": (
+                f"LOWER(COALESCE(ats_provider, source)) {direction}, discovered_at DESC, id DESC"
+            ),
+            "status": f"status {direction}, discovered_at DESC, id DESC",
+        }
+        order_sql = order_map.get(sort_by.strip().lower(), order_map["score_best"])
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         count_cursor = await self.conn.execute(
@@ -411,7 +502,7 @@ class DootRepository:
             f"""
             SELECT * FROM jobs
             {where}
-            ORDER BY COALESCE(llm_score, 0) DESC, alert_only ASC, id DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?
             """,
             tuple(list_params),
